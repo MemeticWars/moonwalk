@@ -138,9 +138,11 @@ func _process(_delta: float) -> void:
 	var built := false
 	for i in wanted:
 		if loaded.has(i):
-			var collider: CollisionShape3D = loaded[i].get_node("Body/Shape")
-			if collider.disabled == wanted[i]:
-				collider.set_deferred("disabled", not wanted[i])
+			# The Body may hold one shape (a plain box, or a fitted prism/cylinder)
+			# or several (the L-shape's Wing + Leg boxes) -- toggle every child.
+			for collider: CollisionShape3D in (loaded[i].get_node("Body") as StaticBody3D).get_children():
+				if collider.disabled == wanted[i]:
+					collider.set_deferred("disabled", not wanted[i])
 			var climb_surface := loaded[i].get_node_or_null("ClimbSurface") as StaticBody3D
 			if climb_surface != null:
 				for climb_collider: CollisionShape3D in climb_surface.get_children():
@@ -243,32 +245,112 @@ func _build_module(index: int, collision_enabled: bool) -> void:
 	var body := StaticBody3D.new()
 	body.name = "Body"
 	root.add_child(body)
-	var collider := CollisionShape3D.new()
-	collider.name = "Shape"
 	var size: Array = dimensions[kind].size_m
-	var box := BoxShape3D.new()
-	box.size = Vector3(size[0], size[1], size[2])
-	if descriptor.has("span"):
-		box.size.x = descriptor.span
-	# Simple exterior collision keeps the render geometry out of the physics mesh.
-	if kind == "central-building" or kind == "central-house":
-		box.size.y = 8.0 # mast above the inhabited floors has no giant invisible wall
-	elif kind == "link-between-block-of-flats":
-		box.size.y = 2.0
-		collider.position.y = float(size[1]) - 2.0
-	elif kind == "radio-mast":
-		box.size.x = 1.2
-		box.size.z = 1.2
-	elif kind == "bench":
-		box.size.y *= BENCH_HEIGHT_SCALE
-	elif kind.begins_with("park-"):
-		box.size = Vector3(0.32, 4.0, 0.32)
-		box.size *= float(descriptor.get("tree_scale", 1.0))
-	collider.position.y += box.size.y * 0.5
-	collider.shape = box
-	collider.disabled = not collision_enabled
-	body.add_child(collider)
+	if kind == "l-shape-building" or kind == "block-of-flats" or kind == "central-building" or kind == "central-house":
+		# A single bounding box massively overshoots these footprints -- an L-shape's
+		# box also fills its own missing quadrant, and the octagonal/round towers
+		# lose their whole corners/circle-to-square gap -- to the point of blocking
+		# Q's climb interaction (1.7 m reach) everywhere but a building's own flat
+		# faces. Measured footprint directly (top-down raycast grid against each
+		# GLB's real triangles) and fit tight prisms/a cylinder to it instead.
+		_add_precise_footprint_collider(body, descriptor, kind, size, collision_enabled)
+	else:
+		var collider := CollisionShape3D.new()
+		collider.name = "Shape"
+		var box := BoxShape3D.new()
+		box.size = Vector3(size[0], size[1], size[2])
+		if descriptor.has("span"):
+			box.size.x = descriptor.span
+		# Simple exterior collision keeps the render geometry out of the physics mesh.
+		if kind == "link-between-block-of-flats":
+			box.size.y = 2.0
+			collider.position.y = float(size[1]) - 2.0
+		elif kind == "radio-mast":
+			box.size.x = 1.2
+			box.size.z = 1.2
+		elif kind == "bench":
+			box.size.y *= BENCH_HEIGHT_SCALE
+		elif kind.begins_with("park-"):
+			box.size = Vector3(0.32, 4.0, 0.32)
+			box.size *= float(descriptor.get("tree_scale", 1.0))
+		collider.position.y += box.size.y * 0.5
+		collider.shape = box
+		collider.disabled = not collision_enabled
+		body.add_child(collider)
 	loaded[index] = root
+
+## Footprint-fitted movement collision for the towers whose silhouette a plain
+## bounding box badly overshoots. Points come from a one-off top-down raycast
+## probe against each asset's real mesh (tools/… not kept; see AGENT.md), not
+## from any authored blueprint, so they are an approximation, not exact metres.
+## GDScript can't fold a PackedVector2Array(...) constructor call into a const,
+## so these stay plain Arrays of Vector2 -- fine, _add_prism_collider only
+## ever iterates them once per building instance.
+const OCTAGON_FOOTPRINT := [
+	Vector2(7.5, 0.0), Vector2(5.75, 2.5), Vector2(5.3, 5.3), Vector2(2.4, 5.75),
+	Vector2(0.0, 7.75), Vector2(-2.4, 5.75), Vector2(-5.3, 5.3), Vector2(-5.75, 2.5),
+	Vector2(-7.5, 0.0), Vector2(-5.75, -2.5), Vector2(-5.3, -5.3), Vector2(-2.4, -5.75),
+	Vector2(0.0, -7.75), Vector2(2.4, -5.75), Vector2(5.3, -5.3), Vector2(5.75, -2.5),
+]
+const CENTRAL_BUILDING_FOOTPRINT := [
+	Vector2(15.7, 0.0), Vector2(13.0, 5.9), Vector2(8.8, 10.0), Vector2(3.3, 11.0),
+	Vector2(-1.2, 12.0), Vector2(-5.9, 11.3), Vector2(-11.8, 10.6), Vector2(-15.5, 5.9),
+	Vector2(-15.7, 0.0), Vector2(-15.7, -6.0), Vector2(-11.8, -10.6), Vector2(-6.0, -11.5),
+	Vector2(-1.2, -12.0), Vector2(3.3, -11.0), Vector2(8.1, -9.3), Vector2(13.0, -5.9),
+]
+
+func _add_precise_footprint_collider(body: StaticBody3D, descriptor: Dictionary, kind: String, size: Array, enabled: bool) -> void:
+	match kind:
+		"l-shape-building":
+			# Two rectangles: a full-width wing plus a narrower leg on one side
+			# (mirrored to the other side for the "-mirrored" placements).
+			var height: float = size[1]
+			var leg_x := -8.25 if descriptor.mirror else 8.25
+			_add_box_collider(body, "Wing", Vector3(0.0, 0.0, -6.5), Vector3(23.0, height, 10.0), enabled)
+			_add_box_collider(body, "Leg", Vector3(leg_x, 0.0, 4.25), Vector3(6.5, height, 12.5), enabled)
+		"block-of-flats":
+			_add_prism_collider(body, "Shape", OCTAGON_FOOTPRINT, size[1], enabled)
+		"central-building":
+			# Same "mast has no giant invisible wall" height cut the old box used.
+			_add_prism_collider(body, "Shape", CENTRAL_BUILDING_FOOTPRINT, 8.0, enabled)
+		"central-house":
+			# This one really is a ~50 m rotunda, not an import-scale bug (its
+			# footprint radius holds within 25.0-25.25 m at all 16 sampled angles).
+			_add_cylinder_collider(body, "Shape", 24.5, 8.0, enabled)
+
+func _add_box_collider(body: StaticBody3D, shape_name: String, center: Vector3, box_size: Vector3, enabled: bool) -> void:
+	var collider := CollisionShape3D.new()
+	collider.name = shape_name
+	var box := BoxShape3D.new()
+	box.size = box_size
+	collider.shape = box
+	collider.position = center + Vector3(0.0, box_size.y * 0.5, 0.0)
+	collider.disabled = not enabled
+	body.add_child(collider)
+
+func _add_prism_collider(body: StaticBody3D, shape_name: String, footprint: Array, height: float, enabled: bool) -> void:
+	var collider := CollisionShape3D.new()
+	collider.name = shape_name
+	var points := PackedVector3Array()
+	for p in footprint:
+		points.append(Vector3(p.x, 0.0, p.y))
+		points.append(Vector3(p.x, height, p.y))
+	var shape := ConvexPolygonShape3D.new()
+	shape.points = points
+	collider.shape = shape
+	collider.disabled = not enabled
+	body.add_child(collider)
+
+func _add_cylinder_collider(body: StaticBody3D, shape_name: String, radius: float, height: float, enabled: bool) -> void:
+	var collider := CollisionShape3D.new()
+	collider.name = shape_name
+	var shape := CylinderShape3D.new()
+	shape.radius = radius
+	shape.height = height
+	collider.shape = shape
+	collider.position.y = height * 0.5
+	collider.disabled = not enabled
+	body.add_child(collider)
 
 func _add_climb_surface(root: Node3D, visual: Node3D, enabled: bool) -> void:
 	# The broad box below is retained for ordinary character movement. This body

@@ -170,16 +170,20 @@ func _climb_test() -> void:
 				break
 	assert(found, "Q must find a real twin-houses facade within its interaction range")
 	# A "found" spot from the sweep above can still land inside the COARSE
-	# box collider (layer 1, what actually stops movement) -- the detailed
-	# facade trimesh (layer 2, climb-ray only) sits inside it, and for some
-	# building assets (central-house, ~50x51 m -- almost certainly an import-
-	# scale bug, well outside every other building's 18-24 m range) the box
-	# extends metres beyond the facade. Handing that overlap to climb's own
-	# move_and_slide depenetrated her straight down through the box's floor
-	# -- not a fall, and nothing to do with the facade's own detail. Back
-	# away in small steps until she's clear of solid geometry while the
-	# facade is still within Q's own interaction reach, the way a player who
-	# stopped at a comfortable distance from the wall would be.
+	# movement collider (layer 1) -- the detailed facade trimesh (layer 2,
+	# climb-ray only) sits inside it. This used to be routine on several
+	# buildings: a plain bounding box massively overshoots an L-shape's own
+	# missing quadrant, and central-house's ~50 m box (that width looked like
+	# an import-scale bug at first, but its measured footprint radius holds
+	# within 25.0-25.25 m at 16 sampled angles -- it really is a ~50 m
+	# rotunda) swallowed its whole corner-to-circle gap. tycho_city.gd's
+	# _add_precise_footprint_collider fits tight prisms/a cylinder to these
+	# now, but handing any remaining sliver of overlap to climb's own
+	# move_and_slide still depenetrated her straight down through the box's
+	# floor once -- not a fall, and nothing to do with the facade's own
+	# detail. Back away in small steps until she's clear of solid geometry
+	# while the facade is still within Q's own interaction reach, the way a
+	# player who stopped at a comfortable distance from the wall would be.
 	var direction: Vector3 = theia._nearest_climb_surface()
 	assert(not direction.is_zero_approx(), "Facade direction must still resolve at the found spot")
 	# No "+ PI" here: direction already points FROM Agnes TOWARD the wall

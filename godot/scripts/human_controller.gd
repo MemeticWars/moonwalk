@@ -19,6 +19,14 @@ var stand_up_active := false
 var stand_up_elapsed := 0.0
 var stand_support_time := 0.0
 const STAND_SUPPORT_DELAY := 0.2
+## Stand_Up2 itself swings the feet through the crouch-to-standing motion, so
+## a foot can sample past a roof's edge (or a parapet/vent) for a frame or two
+## even though the standing footprint she settled on is genuinely solid. Only
+## bailing back to a crawl after support stays lost for a stretch keeps that
+## single-frame flicker from restarting the animation from 0 -- observed in
+## play as Stand_Up2 looping forever right on a roof that could support her.
+var stand_up_miss_time := 0.0
+const STAND_UP_SUPPORT_GRACE := 0.25
 
 func _init() -> void:
 	model_paths = MOTIONS.SOURCES.duplicate()
@@ -421,6 +429,7 @@ func _physics_climb_auto_advance(delta: float) -> void:
 				climb_auto_walk = false
 				stand_up_active = true
 				stand_up_elapsed = 0.0
+				stand_up_miss_time = 0.0
 				_show_climb(STAND_UP, 0.0)
 			_update_camera()
 			return
@@ -543,12 +552,17 @@ func _doorway_ahead(direction: Vector3) -> bool:
 func _physics_stand_up(delta: float) -> void:
 	velocity = Vector3.ZERO
 	if not _roof_can_stand(global_position):
-		stand_up_active = false
-		stand_support_time = 0.0
-		climb_auto_walk = true
-		climb_auto_walk_target = global_position
-		_show_climb(CRAWL, 0.0)
-		return
+		stand_up_miss_time += delta
+		if stand_up_miss_time > STAND_UP_SUPPORT_GRACE:
+			stand_up_active = false
+			stand_support_time = 0.0
+			stand_up_miss_time = 0.0
+			climb_auto_walk = true
+			climb_auto_walk_target = global_position
+			_show_climb(CRAWL, 0.0)
+			return
+	else:
+		stand_up_miss_time = 0.0
 	stand_up_elapsed += delta
 	var duration := players[STAND_UP].current_animation_length
 	_show_climb(STAND_UP, minf(stand_up_elapsed, duration))
