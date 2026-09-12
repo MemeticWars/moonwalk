@@ -35,6 +35,29 @@ Domyślny widok to kamera zza pleców. W TPP postać płynnie obraca się w kier
 
 **Autopilot i eksploracja:** włącz P podczas marszu (lub Shift+P dla biegu w profilu klasycznym), a następnie V, aby niezależnie latać kamerą. Mysz i WASD w swobodnej kamerze nie zmieniają trasy postaci. Ponowne P zatrzymuje autopilota; w zwykłych kamerach świeże naciśnięcie WASD przejmuje sterowanie ręczne. Pauza zatrzymuje również autopilota. Jest to marsz/bieg w ustalonym kierunku, nie nawigacja do celu: korzysta z kolizji, a po sekundzie blokady zatrzymuje się. Nie omija samodzielnie przeszkód. Teren nadal streamuje wokół poruszającej się postaci.
 
+## Skład projektu: kod (GitHub) + assety (Google Drive)
+
+Repozytorium git ([MemeticWars/moonwalk](https://github.com/MemeticWars/moonwalk)) trzyma tylko kod: skrypty GDScript, sceny `.tscn`, shadery, dokumentację i skrypty narzędziowe (`tools/*.py`, `tools/*.mjs`). Ciężkie binarne assety **nie są** w gicie (patrz `.gitignore`) — leżą w udostępnionym folderze Google Drive i trzeba je dograć ręcznie do odpowiednich ścieżek po sklonowaniu repo.
+
+**Co jest wyłączone z gita i ile waży:**
+
+| Ścieżka | Zawartość | Waga |
+|---|---|---|
+| `godot/assets/` | modele `.glb`, tekstury, kafle wysokości `.bin` (Agnes, Theia, lorry, moduły kolonii, teren mezo/regolit) | ~6,7 GB |
+| `source_data/` | surowe GeoTIFF-y LOLA/LROC (`ldem_64_uint.tif`, `ldem_4_uint.tif`, `lroc_color_poles_4k.tif`) — wejście dla `tools/bake_sector_dtm.mjs` | ~522 MB |
+| `artifacts/sprites/` | wyrenderowane podglądy/screenshoty odsyłaczy z tego README | ~1,3 GB |
+| `tools/SunshineClouds2-main.zip`, `tools/SunshineClouds2-source/` | oryginalne archiwum addona chmur (już wypakowane i używane z `godot/addons/SunshineClouds2/`, więc to tylko zbędna kopia źródła) | ~27 MB |
+
+Razem ~8,5 GB. Silnik (`tools/godot/Godot_v4.6.1-stable_win64*.exe`, ~270 MB + `tools/godot.zip`) też jest poza gitem, ale nie trzeba go trzymać na Drive — to zwykła dystrybucja Godota, do pobrania ze [strony Godota](https://godotengine.org/download) w wersji **4.6.1**.
+
+**Jak złożyć projekt od zera:**
+1. `git clone git@github.com:MemeticWars/moonwalk.git`
+2. Z folderu Google Drive skopiuj `godot/assets/`, `source_data/` i (opcjonalnie, tylko dla działających linków w tym README) `artifacts/sprites/` do tych samych ścieżek w klonie repo.
+3. Pobierz Godota 4.6.1 (Forward+, `win64`) i wypakuj/skopiuj do `tools/godot/`, albo wskaż własną instalację silnika.
+4. `START.cmd` (Agnes) lub `powershell -ExecutionPolicy Bypass -File .\START.ps1 -Editor` żeby otworzyć edytor na `godot/project.godot`.
+
+Bez kroku 2 projekt się otworzy i skrypty się skompilują, ale sceny będą pokazywać brakujące zasoby (modele/tekstury) tam, gdzie odwołują się do `res://assets/...`.
+
 ## Co jest gotowe, a co jest szkicem
 
 - **Proporcje i sztywny plecak Agnes:** głowa pomniejszona o 10% z płynnym przejściem wag przy szyi; hełm zmniejszono o kolejne 10% wokół mocowania głowy, a kopułę szybki pogłębiono do przodu, żeby twarz nie dotykała szkła. Plecak wydzielono z siatki kombinezonu jako `RigidBackpack`, bez skórowania i wag kości, mocowany jednym uchwytem do Spine02. Obraca się z tułowiem, ale nie zgina się wraz z kręgosłupem. Pasy pozostają na kombinezonie. Przygotowane kopie sześciu animacji znajdują się w `godot/assets/agnes/fitted`; odtwarza je `tools/fit_agnes.py` uruchomiony po `tools/prepare_agnes.py`. Oryginały pozostają bez zmian. [Plecak od tyłu](artifacts/backpack_0_back.png), [plecak podczas skoku](artifacts/backpack_5_side.png).
