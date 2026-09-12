@@ -2,6 +2,10 @@
 
 Ten plik jest indeksem spraw projektu i służy agentom jako pierwszy punkt orientacji. Każda sprawa ma tutaj dwa zdania opisu, a trzecie zdanie wskazuje plik z pełnymi szczegółami.
 
+## Świat i fabuła
+
+Gra opowiada o kurierze InPost na Księżycu po wojnie odcinającej kolonie od Ziemi, podzielonym między frakcje (górnicy, chińskie miasto, Space Navy, naukowcy, miliarderzy, piraci, ukryta Wspólnota Modelu). Mechanicznie istnieje na razie tylko prototyp symulacji ekonomicznej w Pythonie, niepodłączony do gry w Godocie. Szczegóły fabuły, frakcji i stanu implementacji są w [index/world.md](index/world.md).
+
 ## Współpraca agentów
 
 Nad tym repozytorium jednocześnie pracują agenci Codex oraz Claude. Zmiany należy ograniczać do własnego zadania, sprawdzać stan Git przed edycją i nie nadpisywać bieżącej pracy drugiego agenta. Szczegóły zasad współpracy są w [index/collaboration.md](index/collaboration.md).
