@@ -1,0 +1,20 @@
+{
+  "geoserver_url": "http://127.0.0.1:8080/geoserver",
+  "revision": "silesia-v1",
+  "cache_mb": 512,
+  "sectors": {
+    "silesia": {
+      "dem_layer": "moon:silesia_dem",
+      "ortho_layer": "moon:silesia_ortho",
+      "crs": "EPSG:100002",
+      "origin_easting_m": 0,
+      "origin_northing_m": 0,
+      "reference_elevation_m": 0,
+      "height_scale_to_m": 1,
+      "height_offset_m": 0,
+      "nodata": -32768,
+      "tile_bounds": [-16, -16, 15, 15],
+      "note": "EXAMPLE ONLY: set origin, reference elevation, extent and layer names to the actual registered lunar rasters before enabling the client."
+    }
+  }
+}

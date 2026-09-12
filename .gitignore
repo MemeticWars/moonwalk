@@ -1,0 +1,21 @@
+godot/.godot/
+tools/godot/
+tools/godot.zip
+services/tile_cache/
+services/geoserver.local.json
+**/__pycache__/
+artifacts/*.log
+
+# Secrets -- never committed.
+.env
+
+# Heavy binary assets live on Google Drive instead of in git (see README).
+# Everything else here (scripts, scenes, shaders, docs, tooling code) is
+# small text that belongs in version control.
+godot/assets/
+source_data/
+artifacts/sprites/
+tools/SunshineClouds2-main.zip
+tools/SunshineClouds2-source/
+
+*.log

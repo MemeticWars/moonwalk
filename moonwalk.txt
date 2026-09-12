@@ -1,0 +1,18 @@
+Tak, mapy Księżyca oraz precyzyjne cyfrowe modele terenu (DEM - Digital Elevation Model) są powszechnie i darmowo dostępne, głównie dzięki wieloletnim pomiarom amerykańskiej sondy Lunar Reconnaissance Orbiter (LRO) oraz japońskiej misji SELENE (Kaguya).
+
+Oto jak wyglądają parametry dostępnych danych:
+
+Rozdzielczość map fotograficznych
+
+    Mapy globalne: Zbudowane z mozaiki zdjęć z kamery szerokokątnej (LROC WAC) pokrywają cały Księżyc z rozdzielczością około 100 metrów na piksel.
+
+    Mapy lokalne (wysokiej rozdzielczości): Kamera wąskokątna (LROC NAC) fotografuje wybrane obszary (np. miejsca lądowań Apollo, bieguny, interesujące kratery) z precyzją dochodzącą do 0,5 metra na piksel. Przy takiej ostrości widoczne są nawet ślady pozostawione przez astronautów.
+
+Cyfrowe Modele Terenu (DEM)
+Dzięki połączeniu danych z altimetru laserowego (LOLA) i zdjęć stereoskopowych, NASA dysponuje niezwykle dokładnymi modelami ukształtowania powierzchni:
+
+    Model globalny (SLDEM2015): Łączy dane z LRO i sondy Kaguya, oferując rozdzielczość poziomą rzędu 60-100 metrów przy bardzo wysokiej dokładności pionowej wynoszącej 3-4 metry.
+
+    Modele lokalne (NAC DEM): Tworzone z nakładających się na siebie zdjęć wysokiej rozdzielczości dla konkretnych stref. Osiągają one rozdzielczość przestrzenną rzędu 2 metrów na piksel z precyzją pionową na poziomie zaledwie 1-2 metrów.
+
+Wszystkie te dane są udostępniane publicznie. Możesz je interaktywnie przeglądać (również w 3D) za pomocą przeglądarkowych narzędzi takich jak NASA Moon Trek, lub pobierać surowe pliki do własnych analiz topograficznych bezpośrednio z archiwów NASA Planetary Data System (PDS).
