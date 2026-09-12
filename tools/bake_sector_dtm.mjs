@@ -36,17 +36,17 @@ const REPO = process.env.MOONWALK_REPO || 'D:/projects/moonwalk';
 // the source projection's metres, so we go local -> lat/lon -> source (x,y) px.
 const SOURCES = {
   'Tycho Station': {
-    tiff: 'godot/assets/moon/dem_real/tycho/NAC_DTM_TYCHOPK.TIF',
+    tiff: 'source_data/dem_real/tycho/NAC_DTM_TYCHOPK.TIF',
     proj: 'eqc', lon0: 348.6, lat1: -43.3,
     radiusTiles: 24,
   },
   'Lubin Deep': {
-    tiff: 'godot/assets/moon/dem_real/south_pole/ldem_87s_5mpp.tif',
+    tiff: 'source_data/dem_real/south_pole/ldem_87s_5mpp.tif',
     proj: 'stereoS', lon0: 0,
     radiusTiles: 24,
   },
   'Shackleton Ice': {
-    tiff: 'godot/assets/moon/dem_real/south_pole/ldem_87s_5mpp.tif',
+    tiff: 'source_data/dem_real/south_pole/ldem_87s_5mpp.tif',
     proj: 'stereoS', lon0: 0,
     radiusTiles: 24,
   },
