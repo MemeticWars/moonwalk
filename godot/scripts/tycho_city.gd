@@ -281,7 +281,7 @@ func _build_module(index: int, collision_enabled: bool) -> void:
 
 ## Footprint-fitted movement collision for the towers whose silhouette a plain
 ## bounding box badly overshoots. Points come from a one-off top-down raycast
-## probe against each asset's real mesh (tools/… not kept; see AGENT.md), not
+## probe against each asset's real mesh (tools/… not kept; see index/characters.md), not
 ## from any authored blueprint, so they are an approximation, not exact metres.
 ## GDScript can't fold a PackedVector2Array(...) constructor call into a const,
 ## so these stay plain Arrays of Vector2 -- fine, _add_prism_collider only
