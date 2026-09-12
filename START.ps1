@@ -1,4 +1,4 @@
-param([switch]$Editor, [switch]$Theia)
+param([switch]$Editor)
 $moonRoot = $PSScriptRoot
 $moonGodot = Join-Path $moonRoot 'tools\godot\Godot_v4.6.1-stable_win64.exe'
 if (-not (Test-Path -LiteralPath $moonGodot)) {
@@ -8,5 +8,4 @@ $env:APPDATA = Join-Path $moonRoot 'tools\godot\editor_data'
 $env:LOCALAPPDATA = $env:APPDATA
 $moonArguments = @('--path', ('"' + (Join-Path $moonRoot 'godot') + '"'))
 if ($Editor) { $moonArguments += '--editor' }
-if ($Theia) { $moonArguments += @('--', '--theia') }
 Start-Process -FilePath $moonGodot -ArgumentList $moonArguments

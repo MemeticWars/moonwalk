@@ -272,9 +272,9 @@ func _build_module(index: int, collision_enabled: bool) -> void:
 
 func _add_climb_surface(root: Node3D, visual: Node3D, enabled: bool) -> void:
 	# The broad box below is retained for ordinary character movement. This body
-	# lives on layer 2 only: Agnes's climb rays query the actual render triangles,
-	# while her capsule ignores them. It therefore follows doors, recesses and
-	# facade outlines instead of treating a building's invisible box as a wall.
+	# lives on layer 2: climb rays query the actual render triangles, and Agnes
+	# enables this layer for capsule support after reaching the roof. During
+	# climbing, surface probes follow the facade independently of the broad box.
 	var body := StaticBody3D.new()
 	body.name = "ClimbSurface"
 	body.collision_layer = 2

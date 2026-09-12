@@ -67,10 +67,10 @@ var atlas_path := "res://assets/theia/theia_hooded_walking_texture_0.png"
 func _ready() -> void:
 	name = character_name
 	for pair in [["move_left", KEY_A], ["move_right", KEY_D], ["move_forward", KEY_W], ["move_back", KEY_S]]:
-		InputMap.add_action(pair[0])
+		if not InputMap.has_action(pair[0]): InputMap.add_action(pair[0])
 		var key := InputEventKey.new()
 		key.physical_keycode = pair[1]
-		InputMap.action_add_event(pair[0], key)
+		if not InputMap.action_has_event(pair[0], key): InputMap.action_add_event(pair[0], key)
 	floor_snap_length = 0.65
 	floor_max_angle = deg_to_rad(48)
 	var shape := CapsuleShape3D.new()
@@ -81,8 +81,11 @@ func _ready() -> void:
 	collision.position.y = reference_height_m * 0.5
 	add_child(collision)
 	add_child(pivot)
-	for path in model_paths:
-		var visual := (load(path) as PackedScene).instantiate() as Node3D
+	for visual_index in model_paths.size():
+		var visual := _load_character_visual(visual_index, model_paths[visual_index])
+		if visual == null:
+			enabled = false
+			return
 		pivot.add_child(visual)
 		for mesh: MeshInstance3D in visual.find_children("*", "MeshInstance3D", true, false):
 			for index in mesh.mesh.get_surface_count():
@@ -93,7 +96,7 @@ func _ready() -> void:
 					cloth.roughness = 0.92
 					# The source character is emissive; lunar cloth must follow scene shadows.
 					cloth.emission_enabled = false
-					cloth.albedo_texture = load(atlas_path)
+					if not atlas_path.is_empty(): cloth.albedo_texture = load(atlas_path)
 					cloth.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 					mesh.set_surface_override_material(index, cloth)
 		var anim := visual.find_children("*", "AnimationPlayer", true, false)[0] as AnimationPlayer
@@ -114,7 +117,7 @@ func _ready() -> void:
 	# Measure the real bind-pose height and apply one character-specific scale to
 	# every clip, including its rigid backpack and attached helmet.
 	# so 1 unit stays 1 metre against the terrain and the rover.
-	var raw_height: float = _visual_mesh_bounds(visuals[0], Transform3D.IDENTITY).size.y
+	var raw_height: float = _character_visual_height(visuals[0])
 	pivot.scale = Vector3.ONE * (reference_height_m / raw_height) if raw_height > 0.01 else Vector3.ONE
 	add_child(camera)
 	camera.top_level = true
@@ -357,3 +360,9 @@ func _stamp_foot() -> void:
 
 func _foot_position_for_stamp() -> Vector3:
 	return position + Basis(Vector3.UP, visual_yaw) * Vector3(0.12 * foot_side, 0, 0)
+
+func _load_character_visual(_index: int, path: String) -> Node3D:
+	return (load(path) as PackedScene).instantiate() as Node3D
+
+func _character_visual_height(visual: Node3D) -> float:
+	return _visual_mesh_bounds(visual, Transform3D.IDENTITY).size.y

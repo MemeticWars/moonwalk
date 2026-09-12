@@ -83,15 +83,15 @@ func set_sensitivity(value: float) -> void:
 
 func _ready() -> void:
 	super._ready()
-	InputMap.add_action("run_forward")
+	if not InputMap.has_action("run_forward"): InputMap.add_action("run_forward")
 	var key := InputEventKey.new()
 	key.physical_keycode = KEY_Q
-	InputMap.action_add_event("run_forward", key)
+	if not InputMap.action_has_event("run_forward", key): InputMap.action_add_event("run_forward", key)
 	for pair in [["sprint", KEY_SHIFT], ["fly_up", KEY_SPACE], ["fly_down", KEY_CTRL]]:
-		InputMap.add_action(pair[0])
+		if not InputMap.has_action(pair[0]): InputMap.add_action(pair[0])
 		var binding := InputEventKey.new()
 		binding.physical_keycode = pair[1]
-		InputMap.action_add_event(pair[0], binding)
+		if not InputMap.action_has_event(pair[0], binding): InputMap.action_add_event(pair[0], binding)
 	pivot.rotation.y = visual_yaw
 	persist_settings = not ("--smoke-test" in OS.get_cmdline_user_args() or "--capture" in OS.get_cmdline_user_args() or "--capture-sky" in OS.get_cmdline_user_args() or "--camera-test" in OS.get_cmdline_user_args())
 	var config := ConfigFile.new()

@@ -45,6 +45,29 @@ FOLDER_ID=$(grep -oP '^google_drive=.*folders/\K[^?]*' .env)
 
 rclone binarka jest zainstalowana przez `winget install --id Rclone.Rclone` (nie w PATH tej sesji bez restartu shella — pełna ścieżka zwykle pod `C:\Users\<user>\AppData\Local\Microsoft\WinGet\Packages\Rclone.Rclone_*\rclone-*-windows-amd64\rclone.exe`, sprawdź `Get-Command rclone` po restarcie).
 
+## Testy w Godocie: headless, lokalny silnik, nie ufaj samym testom jednostkowym
+
+Lokalny silnik jest pod `tools/godot/Godot_v4.6.1-stable_win64_console.exe` (patrz wyżej — nie jest w gicie ani na Drive, zwykła dystrybucja 4.6.1). Testy `res://tests/*.gd` (rozszerzają `SceneTree`) odpala się tak:
+
+```bash
+cd godot
+"../tools/godot/Godot_v4.6.1-stable_win64_console.exe" --headless --path . --script tests/human_motion_test.gd
+```
+
+Testy uruchamiane przez samą scenę gry (`--smoke-test`, `--climb-test` i inne flagi w `moonwalk.gd`'s `_ready()`) potrzebują sceny, nie samego `--script`:
+
+```bash
+"../tools/godot/Godot_v4.6.1-stable_win64_console.exe" --headless --path . scenes/moonwalk.tscn -- --climb-test
+```
+
+`--smoke-test` przechodzi przez cały globe/highways/pauzę i potrafi trwać dłużej niż 90 s w headless — nie ucinaj go za krótkim timeoutem, inaczej brak wyniku wygląda jak cichy fail. Stały szum w stderr (`ERROR: BUG: Unreferenced static string to 0: ...`, `Pages in use exist at exit`, ostrzeżenie o Thread) to normalne artefakty silnika przy `quit()` w headless, nie prawdziwe błędy — odfiltruj przez `grep -viE "^ERROR: BUG|Unreferenced|paged_allocator|Thread object|wait_to_finish|RID alloc"`.
+
+**Testy jednostkowe (`godot/tests/*.gd`, syntetyczne pudełka kolizji) przechodzące zielono NIE dowodzą, że mechanika działa w realnej grze.** Przykład z 2026-09-12: generalizacja wspinaczki (`human_controller.gd`) miała `_solid_climb_patch()` wymagający zgodności głębi (≤0,35 m) między 9 promieniami na różnych wysokościach, żeby odrzucić drzwi. Syntetyczne pudełko w teście miało głębię 0 (płaska ściana) — przechodziło. Prawdziwa fasada budynku w Tycho (cokół, opaski okienne) ma naturalną różnicę głębi ~0,4-0,5 m — próg odrzucał niemal cały środek prawdziwej ściany, więc wspinaczka nie działała w ogóle w grze mimo zielonych testów. Namierzone dopiero przez `--climb-test` na realnym budynku ("twin-houses") z ręcznym sondowaniem promieni na różnych `x`. Wniosek: po zmianie progu geometrycznego (kolizje, normalne, odległości) zawsze też przepuść `--climb-test`/`--smoke-test` na prawdziwej scenie, nie tylko testy syntetyczne.
+
+Naprawa: odrzucanie drzwi przeniesione całkowicie do `_doorway_ahead(direction)`, wywoływanego teraz per-kierunek wewnątrz pętli zamiatania w `_nearest_climb_surface()` (wcześniej sprawdzane tylko dla kierunku, w którym postać akurat patrzyła — omijało drzwi trafione przez sam sweep). `_solid_climb_patch()` sprawdza już tylko, czy wszystkie 9 promieni trafia w litą, prawie pionową powierzchnię.
+
+`--smoke-test`'s test "Q alone must run forward" (Elvenpass Q-bieg) też trafił na realny problem geometrii: wcześniejszy krok testu (`move_forward` przez 2 s) zużywa niemal cały wolny teren między wejściem na stację (`TYCHO_PLAYER_START`) a bulkheadem bramy kopuły (`DomeCollision`, patrz [[tycho-dome-gate-bulkhead]]) — test biegu Q startował więc z Theią już dotykającą kolizji kopuły, i prędkość zerowana przez ścianę czytała się jak "Q nie działa". Naprawione w samym teście: `theia.position` i `velocity` są resetowane z powrotem do zapamiętanego `start` tuż przed segmentem biegu Q, żeby test miał świeży odcinek wolnego terenu niezależnie od tego, ile zjadł wcześniejszy krok chodzenia.
+
 ## Git: SSH klucz i tożsamość
 
 - Klucz SSH do GitHuba (konto `MemeticWars`) to `~/.ssh/key` (nie domyślna nazwa `id_ed25519`), więc trzeba go wskazać jawnie — w tym repo jest to zrobione lokalnie: `git config core.sshCommand "ssh -i ~/.ssh/key -o IdentitiesOnly=yes"`.

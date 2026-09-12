@@ -2,7 +2,7 @@ extends Node3D
 
 const ColonyUtil = preload("res://scripts/colony_util.gd")
 const Terrain = preload("res://scripts/lunar_terrain.gd")
-const Theia = preload("res://scripts/elvenpass_controller.gd")
+const Theia = preload("res://scripts/human_controller.gd")
 const Agnes = preload("res://scripts/agnes.gd")
 const Globe = preload("res://scripts/moon_globe.gd")
 const Approach = preload("res://scripts/lunar_approach.gd")
@@ -132,7 +132,7 @@ func _capture_city() -> void:
 	get_tree().quit()
 
 func _climb_test() -> void:
-	assert(theia.character_name == "Agnes", "Climb test requires Agnes")
+	assert(theia.has_method("_try_start_climb"), "Climb test requires a human controller")
 	var city := surface.get_node("TychoCity")
 	var target := -1
 	for i in city.descriptors.size():
@@ -141,7 +141,7 @@ func _climb_test() -> void:
 			break
 	assert(target >= 0, "Tycho needs a twin-houses to test its facade")
 	var root: Node3D = city.loaded.get(target)
-	var deadline := Time.get_ticks_msec() + 20000
+	var deadline := Time.get_ticks_msec() + 60000
 	while root == null and Time.get_ticks_msec() < deadline:
 		terrain.update_focus(Vector3(0, terrain.city_level, 60))
 		await get_tree().process_frame
@@ -223,7 +223,7 @@ func _climb_test() -> void:
 	# onto the roof) for several seconds and fail loudly on any premature
 	# cancel or fall.
 	var highest_y := theia.position.y
-	var deadline_ms := Time.get_ticks_msec() + 8000
+	var deadline_ms := Time.get_ticks_msec() + 60000
 	while Time.get_ticks_msec() < deadline_ms:
 		await get_tree().process_frame
 		if theia.position.y > highest_y:
@@ -232,18 +232,15 @@ func _climb_test() -> void:
 		# (its landing is a scripted position-match, not a pure gravity
 		# touchdown) -- also accept "hasn't actually lost height" as proof
 		# she isn't free-falling, so that one-tick handoff isn't a false trip.
-		assert(theia.climb_active or theia.climb_finishing or theia.is_on_floor() or theia.position.y >= highest_y - 0.05, "Agnes must not free-fall off the facade mid-climb (dropped from %.2f m to %.2f m)" % [highest_y, theia.position.y])
+		assert(theia.climb_active or theia.climb_finishing or theia.climb_auto_walk or theia.stand_up_active or theia.is_on_floor() or theia.position.y >= highest_y - 0.05, "Agnes must not free-fall off the facade mid-climb (dropped from %.2f m to %.2f m)" % [highest_y, theia.position.y])
 		assert(theia.position.y > highest_y - 0.35, "Agnes fell %.2f m from her highest point mid-climb" % (highest_y - theia.position.y))
-		if not theia.climb_active and not theia.climb_finishing:
+		if not theia.climb_active and not theia.climb_finishing and not theia.climb_auto_walk and not theia.stand_up_active:
 			break
-	assert(not theia.climb_active and not theia.climb_finishing, "Climb must reach the roof and finish within 8 s")
-	# Not asserting is_on_floor() here: climb_finishing's landing is a
-	# scripted position-match (see _physics_climb_finish), not a pure gravity
-	# touchdown, and it doesn't reliably flip that flag even a few physics
-	# frames later. That's a separate, pre-existing cosmetic detail of the
-	# finish pose -- unrelated to the "climbs for a moment, then falls"
-	# regression this test exists to catch, which is what the loop above and
-	# the height reached below actually verify.
+	assert(not theia.climb_active and not theia.climb_finishing and not theia.climb_auto_walk and not theia.stand_up_active, "Climb must reach the roof and finish within 60 s")
+	var landing_y := theia.position.y
+	await get_tree().create_timer(2.0).timeout
+	assert(theia.is_on_floor() and theia.position.y > landing_y - 0.15, "Roof must support Agnes after the climb ends")
+
 	print("CLIMB TEST PASS (full): reached the roof at %.2f m (climbed %.2f m total)" % [theia.position.y, theia.position.y - start_y])
 	get_tree().quit()
 
@@ -274,7 +271,7 @@ func _build_surface(colony_name: String, destination: Dictionary = {}) -> void:
 			lorry.set_patrol_route(_tycho_lorry_patrol())
 		surface.add_child(lorry)
 	if not is_instance_valid(theia):
-		theia = Theia.new() if "--theia" in OS.get_cmdline_user_args() else Agnes.new()
+		theia = Agnes.new()
 	theia.terrain = terrain
 	theia.spawn_position = _player_start()
 	surface.add_child(theia)
@@ -1200,6 +1197,13 @@ func _smoke_test() -> void:
 	theia._start_turn(1)
 	await get_tree().create_timer(theia.turn_duration + 0.1).timeout
 	assert(absf(wrapf(theia.visual_yaw - facing, -PI, PI)) < 0.001, "D must turn right by 20 degrees")
+	# The walk-forward check above already spent most of the clear ground between
+	# the station entrance and the dome's gate bulkhead: continuing to run from
+	# here rams Theia into that collision within the first physics tick, reading
+	# velocity that a real wall stopped, not one Q failed to produce. This is only
+	# an input/velocity check, so give it its own clear run back at the entrance.
+	theia.position = start
+	theia.velocity = Vector3.ZERO
 	Input.action_press("run_forward")
 	await get_tree().create_timer(0.5).timeout
 	assert(Vector2(theia.velocity.x, theia.velocity.z).length() > 4.5, "Q alone must run forward")
