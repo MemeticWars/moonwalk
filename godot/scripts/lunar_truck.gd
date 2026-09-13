@@ -1,11 +1,14 @@
 extends "res://scripts/lunar_lorry.gd"
-## Textured unmanned cargo rover, using the same physical drive as Lorry.
-# This GLB carries its three JPEG maps and matching UVs internally. The former
-# segmented support-rover GLB only contained vertex colours, so borrowing this
-# material for it would have produced a scrambled texture.
-const TRUCK_SCENE := preload("res://assets/lorry/lunar_logistics_rover_baked.glb")
+## Textured eight-wheel unmanned cargo rover, using the same physical drive as Lorry.
+# Built by tools/prepare_lunar_truck.py from two separate Meshy exports of the
+# same rover: a single fully-textured hull (its own wheel bulges are fused
+# into the body mesh, no clean cut boundary) and an untextured part-segmentation
+# pass whose 8 wheels are individually separable. The prep script scales the
+# segmented wheels into the textured hull's frame and re-materials them as
+# plain tire rubber, so they cleanly cover the hull's built-in wheel bulges.
+const TRUCK_SCENE := preload("res://assets/lorry/lunar_logistics_rover_full.glb")
 const LENGTH_M := 12.0
-const TRUCK_WHEELS := ["mesh_0", "mesh_5", "mesh_9", "mesh_10"]
+const TRUCK_WHEELS := ["wheel_0", "wheel_1", "wheel_2", "wheel_3", "wheel_4", "wheel_5", "wheel_6", "wheel_7"]
 
 func _build_visuals() -> void:
 	model = TRUCK_SCENE.instantiate()
@@ -25,15 +28,16 @@ func _fit_pod() -> void:
 	pass
 
 func drive_engine_pull() -> float:
-	# This donor model has four wheels, not eight, but doubling every hull
-	# dimension still gives an 8x loaded mass; keep the same low lunar
-	# acceleration as the small Lorry, while wheel traction remains the limit.
+	# Eight driven wheels and an 8x loaded mass (doubled hull dimensions) keep
+	# the same low lunar acceleration as the small Lorry, while wheel traction
+	# remains the limit.
 	return ENGINE_PULL * 8.0
 
 func _place_collider_and_mass() -> void:
-	# The baked donor has a single textured body spread over several meshes.
-	# Its complete bounds give a reliable hull envelope; reduce it enough that
-	# the wheel rays, not the box, remain responsible for ground contact.
+	# The combined donor has a single textured body plus 8 separate wheel
+	# meshes. The body's complete bounds give a reliable hull envelope;
+	# reduce it enough that the wheel rays, not the box, remain responsible
+	# for ground contact.
 	var bounds := _combined_aabb(_all_meshes(model))
 	var shape := BoxShape3D.new()
 	shape.size = bounds.size * Vector3(0.88, 0.54, 0.90)

@@ -34,7 +34,7 @@ Gra działa w Godot 4.6.1 i streamuje lokalny sektor księżycowy wokół aktywn
 
 ## Pojazdy i konwój
 
-Agnes może prowadzić Lorry po wejściu klawiszem E, a za łazikiem jadą dwa czterokołowe, teksturowane drony transportowe, parkujące na wyznaczonych stanowiskach przy śluzie Tycho. Pojazdy korzystają z fizyki księżycowej, ograniczonej przyczepności oraz wspólnego sterowania napędem, a drony śledzą trasę poprzednika i zachowują odstęp. Szczegóły sterowania, implementacji i testów są w [index/vehicles.md](index/vehicles.md).
+Agnes może prowadzić Lorry po wejściu klawiszem E, a za łazikiem jadą dwa ośmiokołowe, teksturowane drony transportowe, parkujące na wyznaczonych stanowiskach przy śluzie Tycho. Pojazdy korzystają z fizyki księżycowej, ograniczonej przyczepności oraz wspólnego sterowania napędem, a drony śledzą trasę poprzednika i zachowują odstęp. Szczegóły sterowania, implementacji i testów są w [index/vehicles.md](index/vehicles.md).
 
 ## Ciągłość terenu
 

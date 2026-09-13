@@ -12,7 +12,7 @@ To przybliżenie do gry, bez deformowalnego regolitu i pełnego modelu zapadania
 
 ## Ciężarówki-drony
 
-`godot/scripts/lunar_truck.gd` wykorzystuje teksturowany `godot/assets/lorry/lunar_logistics_rover_baked.glb`, normalizowany do 12 m długości, czyli dwukrotnie większej skali liniowej niż pierwotny 6 m pojazd. Każdy dron ma cztery fizyczne koła (`mesh_0`, `mesh_5`, `mesh_9`, `mesh_10`), kolizję kadłuba i masę 28 800 kg, odzwierciedlającą ośmiokrotnie większą objętość; napęd współdzieli z Lorry, rozłożony teraz na cztery koła zamiast ośmiu.
+`godot/scripts/lunar_truck.gd` wykorzystuje teksturowany `godot/assets/lorry/lunar_logistics_rover_full.glb`, normalizowany do 12 m długości, czyli dwukrotnie większej skali liniowej niż pierwotny 6 m pojazd. Każdy dron ma osiem fizycznych kół (`wheel_0`..`wheel_7`), kolizję kadłuba i masę 28 800 kg, odzwierciedlającą ośmiokrotnie większą objętość; napęd współdzieli z Lorry.
 
 Przed wjazdem przez śluzę Tycho `tycho_cosmoport.gd` buduje równy parking z dwoma oznaczonymi stanowiskami 16×28 m, oświetleniem i kolizją. Jest on z boku drogi dojazdowej, po zewnętrznej stronie portalu i przed początkiem autostrady; `add_city_pad()` wyrównuje pod nim teren przed zbudowaniem nawierzchni. Drony rozpoczynają tam pracę, a nie w osi śluzy.
 
@@ -20,11 +20,14 @@ Przed wjazdem przez śluzę Tycho `tycho_cosmoport.gd` buduje równy parking z d
 
 Integracja w `moonwalk.gd` tworzy konwój po dodaniu Agnes w sektorach, w których istnieje Lorry. Podczas jazdy streaming terenu podąża za łazikiem; w pauzie i na mapie pojazdy są zamrożone. Istniejący `--lorry-test` zachowuje osobny patrol diagnostyczny i nie tworzy sterowania kierowcy.
 
-## Materiał ciężarówek
+## Materiał i geometria ciężarówek
 
-Aktualny widok drona korzysta z `godot/assets/lorry/lunar_logistics_rover_baked.glb`, ponieważ ten plik GLB zawiera trzy osadzone obrazy JPEG i zgodne z nimi UV. Wcześniejszy `assets/track/lunar_support_rover_lod.glb` nie ma ani obrazu, ani współrzędnych UV, tylko kolory wierzchołków, dlatego nie można na niego poprawnie nałożyć znalezionej tekstury.
+`godot/assets/lorry/lunar_logistics_rover_full.glb` łączy geometrię z dwóch osobnych eksportów Meshy tego samego łazika, sklejonych skryptem `tools/prepare_lunar_truck.py` (uruchamiany przez `blender --background --python tools/prepare_lunar_truck.py`):
 
-Teksturowany model jest skalowany do 12 m, ma cztery widoczne i obracane koła (`mesh_0`, `mesh_5`, `mesh_9`, `mesh_10`) oraz ten sam ciężki napęd i kolizję co poprzedni dron. Nie należy rozdzielać obrazów z GLB ani przypisywać ich ręcznie do modelu `track`, bo jego siatka ma inną topologię i bez UV otrzymałaby przypadkowy wzór.
+- kadłub: pojedyncza, w pełni teksturowana siatka z `artifacts/sprites/track/Meshy_AI_Lunar_Logistics_Rover_0908201853_texture.glb` (3 osadzone obrazy JPEG 2048×2048, zgodne UV) — jej własne wybrzuszenia kół są zespolone z nadwoziem (nawet po spawaniu wierzchołków to jedna spójna siatka), więc zostają bez zmian;
+- koła: 8 osobnych siatek z `artifacts/sprites/track/Meshy_AI_Lunar Logistics Rover_1788897764_part-segmentation.glb` (part-segmentation, bez tekstur — dwie pozostałe części tego pliku to jego własny kadłub/góra, odrzucane, bo kadłub bierzemy z pliku teksturowanego). Obie eksportacje przedstawiają ten sam pojazd w spójnie różnej skali (~15,77× na każdej z trzech osi niezależnie, zweryfikowane przed napisaniem skryptu), więc jeden jednorodny współczynnik przenosi koła do układu kadłuba bez zniekształcenia tarczy koła; wyrównanie w pionie łączy płaszczyzny styku z gruntem obu modeli (nie wspólny początek układu — początek dawcy leży w płaszczyźnie kół, środek kadłuba leży w jego środku objętości). Koła dostają płaski, ciemny materiał gumy zamiast szarego placeholdera part-segmentation.
+
+Nie należy rozdzielać obrazów z pliku teksturowego ani przypisywać ich ręcznie do siatki kół z part-segmentation — to dwie różne generacje Meshy o innej topologii, bez wspólnych UV.
 
 ## Testy
 

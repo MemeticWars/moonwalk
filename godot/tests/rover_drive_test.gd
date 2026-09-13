@@ -32,7 +32,7 @@ func run() -> void:
 	root.add_child(truck)
 	await create_timer(4).timeout
 	assert(rover.rig_ready and truck.rig_ready)
-	assert(rover.vwheels.size() == 4 and truck.vwheels.size() == 4)
+	assert(rover.vwheels.size() == 4 and truck.vwheels.size() == 8)
 	var start := rover.position
 	var truck_start := truck.position
 	rover.drive_brake = false
@@ -42,7 +42,7 @@ func run() -> void:
 	await create_timer(8).timeout
 	print("DRIVE delta=", rover.position - start, " truck=", truck.position - truck_start, " speed=", rover.linear_velocity)
 	assert(rover.position.z < start.z - 2, "W must drive toward the model's front (-Z)")
-	assert(truck.position.z < truck_start.z - 2, "Cargo drone must move on its four physical wheels")
+	assert(truck.position.z < truck_start.z - 2, "Cargo drone must move on its eight physical wheels")
 	var speed := rover.linear_velocity.length()
 	rover.drive_throttle = 0
 	await create_timer(1).timeout

@@ -17,7 +17,7 @@ func run() -> void:
 	var stands: PackedVector3Array = port.truck_stands_global()
 	assert(stands.size() == 2, "Tycho must provide two freight parking stands outside the airlock")
 	for truck in convoy.trucks:
-		assert(truck.rig_ready and truck.vwheels.size() == 4)
+		assert(truck.rig_ready and truck.vwheels.size() == 8)
 		assert(is_equal_approx(truck.mass, 28800.0), "Scaled freight truck mass must match its 12 m hull")
 	var truck_size: Vector3 = convoy.trucks[0]._combined_aabb(convoy.trucks[0]._all_meshes(convoy.trucks[0].model)).size
 	var truck_length: float = maxf(maxf(truck_size.x, truck_size.y), truck_size.z)
@@ -44,5 +44,5 @@ func run() -> void:
 	game.lorry.linear_velocity = Vector3.ZERO
 	convoy._exit_rover()
 	assert(not convoy.driving and game.theia.enabled and game.theia.collision_layer != 0, "Stopped rover must allow a safe exit")
-	print("CONVOY GAME PASS: two four-wheel freight drones, boarding, player follows vehicle, pause, moving-exit guard")
+	print("CONVOY GAME PASS: two eight-wheel freight drones, boarding, player follows vehicle, pause, moving-exit guard")
 	quit()
