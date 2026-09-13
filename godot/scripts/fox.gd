@@ -57,13 +57,19 @@ func _scale_to_height() -> void:
 		var b: AABB = m.global_transform * m.mesh.get_aabb()
 		box = b if not seeded else box.merge(b)
 		seeded = true
-	var scale := TARGET_HEIGHT_M / maxf(box.size.z, 0.000000001)
+	# box is already world-space (transformed by m.global_transform above), so
+	# Y is unambiguously up -- .z was a leftover from the old fox.glb's own
+	# axis convention and silently measured a horizontal (depth) extent
+	# instead of height, undershooting the divisor and oversizing the fox
+	# ~1.7x (plus a bogus near-zero foot offset instead of the true negative
+	# one, sinking the paws into the ground).
+	var scale := TARGET_HEIGHT_M / maxf(box.size.y, 0.000000001)
 	_body.scale = Vector3.ONE * scale
-	# box.position.z is the lowest point's offset from the model's own local
-	# origin (measured at scale=1) -- slightly positive (paws sit just above
-	# local (0,0,0)), so without this the paws hover above the ground by
-	# that offset once scaled up.
-	_foot_offset = box.position.z * scale
+	# box.position.y is the lowest point's offset from the model's own local
+	# origin (measured at scale=1) -- negative (paws sit below local (0,0,0)),
+	# so without this the paws hover above the ground by that offset once
+	# scaled up.
+	_foot_offset = box.position.y * scale
 
 func _clear_of_trees(x: float, z: float) -> bool:
 	var p := Vector2(x, z)

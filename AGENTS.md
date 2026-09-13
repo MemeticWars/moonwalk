@@ -16,7 +16,8 @@ Przed rozpoczęciem zadania dopisz wiersz do tabeli, a po scommitowaniu lub porz
 
 | Agent | Zakres (pliki/moduł/uruchomiony Godot) | Rozpoczęto (UTC) |
 |---|---|---|
-| _(brak aktywnej pracy)_ | | |
+| Codex | fox.gd: pomiar animowanej siatki i wysokość 40 cm; test w osobnym projekcie artifacts/fox_validation | 2026-09-13 |
+| Claude | fox.gd `_scale_to_height()`: naprawiony 2-liniowy błąd osi (Z→Y) powodujący ~1.7x za duży lisek; patrz opis niżej, nie cofać | 2026-09-13T18:25Z |
 
 Zasady: sprawdź tabelę, zanim zaczniesz edytować lub uruchomisz Godota — nakładający się zakres oznacza czekanie albo zawężenie się do rozłącznej części. Wpis obejmuje też dłuższe uruchomienie Godota (test, `--headless`, `--agent-run`), bo równoległe procesy Godota potrafią uszkodzić wspólny cache importu (`.godot/imported/`) i dawać fałszywe błędy kompilacji — nie tylko konflikt plików wymaga zgłoszenia. Wpis starszy niż ok. 2h bez aktualizacji traktuj jako potencjalnie porzucony, ale zweryfikuj to (`git log`, `git status`) zamiast go po prostu kasować. Po nieudanym teście z `assert()` proces Godota zwykle się nie kończy sam — ubij go, zanim zwolnisz swój wiersz.
 
