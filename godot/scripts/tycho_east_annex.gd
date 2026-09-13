@@ -1,18 +1,15 @@
 extends Node3D
 ## East annex, alongside the central-peak power plant: a second full dome
-## (D2, same core building skeleton as D1: central-house, central-building,
-## the six-tower block-of-flats arc with its connectors, twin-houses and the
-## two L-buildings -- greenhouses/tanks/benches/masts/trees are D1-only,
-## kept out of scope here) plus three half-scale mini-domes (m1 east, m2
+## (D2, seven apartment towers, smaller twin/L homes and a birch/pine park)
+## plus three half-scale mini-domes (m1 east, m2
 ## south, m3 west of D1 -- m3 moved here from north, its old slot now held
 ## by the solar array below), joined by simple walkable airlock tunnels.
 ## Connection graph: m1-D1, m2-D1, m3-D1, m2-D2 -- D2 sits further south,
 ## beyond m2, and only m2 bridges the two big domes.
 ##
-## Mini/D2 building placement is paused for now (m3, the west mini-dome,
-## holds the excavated fish pond) -- every dome here is currently
-## an empty shell plus its tunnel. _build_d2_habitat()/_build_mini_habitat()
-## are kept below, unused, to restore later.
+## m1 is the greenhouse quarter, m2 is a small residential quarter, and m3
+## keeps only three small homes around its excavated fish pond. Every dome has
+## lawn and a continuous pedestrian route from its centre through its tunnels.
 ##
 ## Deliberately independent of tycho_city.gd's own descriptor/streaming
 ## system (which is tuned and tested for exactly D1's 65 modules, with
@@ -25,6 +22,8 @@ const City := preload("res://scripts/tycho_city.gd")
 const Site := preload("res://scripts/tycho_site.gd")
 const WaterLayout := preload("res://scripts/tycho_water_layout.gd")
 const ASSETS := "res://assets/colonies/tycho/modules/"
+const GRASS_BLADE := preload("res://shaders/grass_blade.gdshader")
+const GRASS_FIELD := preload("res://scripts/tycho_grass.gd")
 ## Due north (m3's old slot) is no longer free: tycho_city.gd now grades its
 ## own gate/forecourt/junction and cosmoport-apron pads there (the real
 ## terrain climbs steeply on that side, toward the summit), and their
@@ -46,6 +45,8 @@ const CROSS_SECTION_SIDE := 2.0 * 3.431572198867798
 var terrain: Node3D
 var dimensions: Dictionary = {}
 var built := false
+var habitat_descriptors: Array[Dictionary] = []
+var pedestrian_segments: Array[PackedVector2Array] = []
 
 func _ready() -> void:
 	name = "TychoEastAnnex"
@@ -81,6 +82,8 @@ func _build() -> void:
 	var m1_level: float = terrain.add_city_pad(City.M1_CENTER, City.MINI_RADIUS, City.MINI_BLEND, 80.0, d1_level)
 	var m2_level: float = terrain.add_city_pad(City.M2_CENTER, City.MINI_RADIUS, City.MINI_BLEND, 80.0, d1_level)
 	var m3_level: float = terrain.add_city_pad(City.M3_CENTER, City.MINI_RADIUS, City.MINI_BLEND, 80.0, d1_level)
+	habitat_descriptors.clear()
+	pedestrian_segments.clear()
 	_build_dome(City.D2_CENTER, d2_level, City.D2_RADIUS, City.D2_HEIGHT,
 		City.tunnel_cuts_toward(City.D2_CENTER, [City.M2_CENTER], City.D2_RADIUS))
 	_build_dome(City.M1_CENTER, m1_level, City.MINI_RADIUS, City.MINI_HEIGHT,
@@ -89,6 +92,16 @@ func _build() -> void:
 		City.tunnel_cuts_toward(City.M2_CENTER, [Site.CENTER, City.D2_CENTER], City.MINI_RADIUS))
 	_build_dome(City.M3_CENTER, m3_level, City.MINI_RADIUS, City.MINI_HEIGHT,
 		City.tunnel_cuts_toward(City.M3_CENTER, [Site.CENTER], City.MINI_RADIUS))
+	_build_d2_habitat(City.D2_CENTER, d2_level)
+	_build_m1_greenhouse_quarter(City.M1_CENTER, m1_level)
+	_build_mini_habitat(City.M2_CENTER, m2_level, "m2")
+	_build_mini_habitat(City.M3_CENTER, m3_level, "m3")
+	_build_d2_park(City.D2_CENTER, d2_level)
+	_build_pedestrian_network(d1_level)
+	_build_lawn(City.D2_CENTER, d2_level, City.D2_RADIUS - 7.0, "D2")
+	_build_lawn(City.M1_CENTER, m1_level, City.MINI_RADIUS - 4.0, "m1")
+	_build_lawn(City.M2_CENTER, m2_level, City.MINI_RADIUS - 4.0, "m2")
+	_build_lawn(City.M3_CENTER, m3_level, City.MINI_RADIUS - 4.0, "m3")
 	_build_tunnel(Site.CENTER, d1_level, 100.0, City.M1_CENTER, m1_level, City.MINI_RADIUS)
 	_build_tunnel(Site.CENTER, d1_level, 100.0, City.M2_CENTER, m2_level, City.MINI_RADIUS)
 	_build_tunnel(Site.CENTER, d1_level, 100.0, City.M3_CENTER, m3_level, City.MINI_RADIUS)
@@ -104,60 +117,245 @@ func _build_dome(center: Vector2, level: float, radius: float, height: float, cu
 	dome.extra_cuts = cuts
 	add_child(dome)
 
-## Same core skeleton as tycho_city.gd's _layout(): central-house,
-## central-building, the six-tower arc with connectors, twin-houses and the
-## two L-buildings. Greenhouses/tanks/benches/masts/the tree garden are
-## D1-only and stay out of scope here.
+## Seven towers form a loose outer arc, leaving the north-south pedestrian
+## spine and the east-side park open. Smaller homes fill the west/south bays.
 func _build_d2_habitat(center: Vector2, level: float) -> void:
-	_place(center, level, "central-house", 0, 35)
-	_place(center, level, "central-building", 69, -20)
-	for side in [-1.0, 1.0]:
-		var towers: Array[Vector2] = [Vector2(side * 34, 58), Vector2(side * 56, 38), Vector2(side * 68, 10)]
-		for tower: Vector2 in towers:
-			_place(center, level, "block-of-flats", tower.x, tower.y)
-		for i in 2:
-			var mid := (towers[i] + towers[i + 1]) * 0.5
-			var direction := towers[i + 1] - towers[i]
-			var lift := float(dimensions["block-of-flats"].size_m[1]) * 2.0 / 3.0 - float(dimensions["link-between-block-of-flats"].size_m[1]) * 0.5
-			var span := direction.length() - float(dimensions["block-of-flats"].size_m[0]) * 0.8
-			_place(center, level, "link-between-block-of-flats", mid.x, mid.y, atan2(-direction.y, direction.x), lift, span)
-	for z in [-22.0, 0.0, 22.0]:
-		_place(center, level, "twin-houses", -39, z, PI / 2.0)
-	_place(center, level, "twin-houses", 43, 0, -PI / 2.0)
-	_place(center, level, "l-shape-building", -52, -44)
-	_place(center, level, "l-shape-building", 52, -44, 0.0, 0.0, -1.0, true)
+	var towers: Array[Vector2] = [
+		Vector2(-62, 42), Vector2(-70, 8), Vector2(-60, -34),
+		Vector2(0, 67),
+		Vector2(60, -34), Vector2(70, 8), Vector2(62, 42),
+	]
+	for tower: Vector2 in towers:
+		_place(center, level, "block-of-flats", tower.x, tower.y, 0.0, 0.0, -1.0, false, "D2")
+	for z in [-40.0, -16.0, 16.0]:
+		_place(center, level, "twin-houses", -31.0, z, PI / 2.0, 0.0, -1.0, false, "D2")
+	_place(center, level, "twin-houses", 30.0, -42.0, 0.0, 0.0, -1.0, false, "D2")
+	_place(center, level, "l-shape-building", -31.0, 47.0, PI, 0.0, -1.0, false, "D2")
+	_place(center, level, "l-shape-building", 31.0, -13.0, PI, 0.0, -1.0, true, "D2")
 
 ## Twin-houses + one L-building, sized to comfortably clear a 50 m dome wall.
-func _build_mini_habitat(center: Vector2, level: float) -> void:
-	_place(center, level, "twin-houses", -14.0, -14.0, PI / 2.0)
-	_place(center, level, "twin-houses", 14.0, -14.0, PI / 2.0)
-	_place(center, level, "l-shape-building", 0.0, 16.0)
+## This deliberately remains only three homes in lake-dome m3.
+func _build_mini_habitat(center: Vector2, level: float, site_name: String) -> void:
+	if site_name == "m3":
+		# Keep the broad lake and its east-west boardwalk open.
+		_place(center, level, "twin-houses", -20.0, 29.0, 0.0, 0.0, -1.0, false, site_name)
+		_place(center, level, "twin-houses", 20.0, 29.0, 0.0, 0.0, -1.0, false, site_name)
+		_place(center, level, "l-shape-building", 0.0, -31.0, 0.0, 0.0, -1.0, false, site_name)
+	else:
+		_place(center, level, "twin-houses", -15.0, -15.0, PI / 2.0, 0.0, -1.0, false, site_name)
+		_place(center, level, "twin-houses", 15.0, -15.0, PI / 2.0, 0.0, -1.0, false, site_name)
+		_place(center, level, "l-shape-building", -22.0, 17.0, 0.0, 0.0, -1.0, false, site_name)
 
-func _place(base: Vector2, level: float, kind: String, x: float, z: float, yaw: float = 0.0, lift: float = 0.0, span: float = -1.0, mirror: bool = false) -> void:
+func _build_m1_greenhouse_quarter(center: Vector2, level: float) -> void:
+	_place(center, level, "twin-houses", -15.0, -25.0, PI / 2.0, 0.0, -1.0, false, "m1")
+	_place(center, level, "l-shape-building", -23.0, 17.0, PI / 2.0, 0.0, -1.0, false, "m1")
+	# Three times D1's three-bay row, arranged around a clear west-centre path.
+	for x in [7.0, 19.0, 31.0]:
+		for z in [-24.0, -12.0, 0.0]:
+			_place(center, level, "greenhouse", x, z, 0.0, 0.0, -1.0, false, "m1")
+
+func _place(base: Vector2, level: float, kind: String, x: float, z: float, yaw: float = 0.0, lift: float = 0.0, span: float = -1.0, mirror: bool = false, site_name: String = "") -> void:
 	var asset := kind + "-mirrored" if mirror else kind
 	var scene := load(ASSETS + asset + ".glb") as PackedScene
 	var root := scene.instantiate() as Node3D
 	root.name = kind
 	root.position = Vector3(base.x + x, level + lift, base.y + z)
 	root.rotation.y = yaw
+	root.set_meta("kind", kind)
+	root.set_meta("site", site_name)
 	if kind == "block-of-flats":
 		root.scale *= 1.2
+	if kind == "greenhouse":
+		root.scale.x *= 0.5
 	var size: Array = dimensions[kind].size_m
 	if span > 0.0:
 		root.scale.x = span / float(size[0])
 	add_child(root)
+	habitat_descriptors.append({"kind": kind, "site": site_name, "point": base + Vector2(x, z), "yaw": yaw})
 	var body := StaticBody3D.new()
 	body.name = "Body"
 	root.add_child(body)
 	var collider := CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = Vector3(span if span > 0.0 else float(size[0]), float(size[1]), float(size[2]))
+	if kind == "greenhouse":
+		# The scene root is halved on X; compensate here so its prepared 12 m
+		# footprint, rather than a second accidental halving, remains collidable.
+		box.size.x *= 2.0
+	elif kind.begins_with("park-"):
+		box.size = Vector3(0.35, minf(4.0, float(size[1])), 0.35)
 	if kind == "link-between-block-of-flats":
 		box.size.y = 2.0
 		collider.position.y = float(size[1]) - 2.0
 	collider.position.y += box.size.y * 0.5
 	collider.shape = box
 	body.add_child(collider)
+
+func _build_d2_park(center: Vector2, level: float) -> void:
+	var index := 0
+	for x in [18.0, 26.0, 34.0, 42.0]:
+		for z in [12.0, 22.0, 32.0, 42.0]:
+			var kind := "park-birch" if index % 2 == 0 else "park-pine"
+			_place(center, level, kind, x, z, float(index) * 1.71, 0.0, -1.0, false, "D2")
+			index += 1
+
+func _build_pedestrian_network(level: float) -> void:
+	var concrete := StandardMaterial3D.new()
+	concrete.albedo_color = Color("8d8f8d")
+	concrete.roughness = 0.94
+	# Each new sphere gets a route from its centre to every connected doorway.
+	# The tunnel spans are included, yielding one continuous visible pavement.
+	_add_walkway(City.M1_CENTER, Site.CENTER + Vector2(100.0, 0.0), level, concrete, "m1_to_D1")
+	_add_walkway(City.M2_CENTER, Site.CENTER + Vector2(0.0, 100.0), level, concrete, "m2_to_D1")
+	_add_walkway(City.M2_CENTER, City.D2_CENTER - Vector2(0.0, City.D2_RADIUS), level, concrete, "m2_to_D2")
+	_add_walkway(City.D2_CENTER, City.M2_CENTER + Vector2(0.0, City.MINI_RADIUS), level, concrete, "D2_to_m2")
+	# The west tunnel reserves its +Z wall for the brook. Its 0.8 m-offset
+	# pavement is extended through the m3 lake as a boardwalk to the centre.
+	var west_d1 := Site.CENTER + Vector2(-94.0, 0.8)
+	var west_m3 := Site.CENTER + Vector2(-135.0, 0.8)
+	_add_walkway(City.M3_CENTER, west_m3, level, concrete, "m3_lake_boardwalk")
+	pedestrian_segments.append(PackedVector2Array([west_m3, west_d1]))
+
+func _add_walkway(a: Vector2, b: Vector2, level: float, material: Material, path_name: String) -> void:
+	var length := a.distance_to(b)
+	if length < 0.1:
+		return
+	var body := StaticBody3D.new()
+	body.name = "PedestrianPath_" + path_name
+	body.position = Vector3((a.x + b.x) * 0.5, level + 0.055, (a.y + b.y) * 0.5)
+	body.basis = Basis.looking_at(Vector3(b.x - a.x, 0.0, b.y - a.y).normalized(), Vector3.UP)
+	var size := Vector3(2.4, 0.10, length)
+	var shape := BoxShape3D.new()
+	shape.size = size
+	var collision := CollisionShape3D.new()
+	collision.shape = shape
+	body.add_child(collision)
+	var surface := MeshInstance3D.new()
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	surface.mesh = mesh
+	surface.material_override = material
+	body.add_child(surface)
+	add_child(body)
+	pedestrian_segments.append(PackedVector2Array([a, b]))
+
+func _build_lawn(center: Vector2, level: float, radius: float, site_name: String) -> void:
+	var lawn := MeshInstance3D.new()
+	lawn.name = "Lawn_" + site_name
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var green := StandardMaterial3D.new()
+	green.albedo_color = Color("35502c")
+	green.roughness = 1.0
+	surface.set_material(green)
+	const CELL := 2.0
+	var cells := ceili(radius * 2.0 / CELL)
+	for ix in cells:
+		for iz in cells:
+			var x0 := -radius + float(ix) * CELL
+			var z0 := -radius + float(iz) * CELL
+			var corners := [Vector2(x0, z0), Vector2(x0 + CELL, z0), Vector2(x0 + CELL, z0 + CELL), Vector2(x0, z0 + CELL)]
+			if corners[0].length() > radius and corners[1].length() > radius and corners[2].length() > radius and corners[3].length() > radius:
+				continue
+			var vertices: Array[Vector3] = []
+			for corner: Vector2 in corners:
+				var clipped := corner.limit_length(radius)
+				var world := center + clipped
+				vertices.append(Vector3(clipped.x, terrain.height_at(world.x, world.y) - level + 0.015, clipped.y))
+			for order in [[0, 2, 1], [0, 3, 2]]:
+				for vertex_index: int in order:
+					surface.add_vertex(vertices[vertex_index])
+	surface.generate_normals()
+	lawn.mesh = surface.commit()
+	lawn.position = Vector3(center.x, level, center.y)
+	lawn.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(lawn)
+	_build_grass(center, level, radius, site_name)
+
+func _build_grass(center: Vector2, level: float, radius: float, site_name: String) -> void:
+	var blade := QuadMesh.new()
+	blade.size = Vector2(0.02, 0.4)
+	blade.center_offset = Vector3(0.0, 0.2, 0.0)
+	var grass_material := ShaderMaterial.new()
+	grass_material.shader = GRASS_BLADE
+	grass_material.set_shader_parameter("emission_amount", 0.5)
+	blade.material = grass_material
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(site_name) + 22041
+	const SPACING := 0.38
+	var steps := floori(radius * 2.0 / SPACING)
+	var places: Array[Vector3] = []
+	var customs: Array[Color] = []
+	for ix in steps:
+		for iz in steps:
+			var local := Vector2(
+				-radius + (float(ix) + 0.5 + rng.randf_range(-0.42, 0.42)) * SPACING,
+				-radius + (float(iz) + 0.5 + rng.randf_range(-0.42, 0.42)) * SPACING)
+			if local.length() > radius:
+				continue
+			var world := center + local
+			if WaterLayout.depth(world) > 0.02 or _grass_blocked(world, site_name):
+				continue
+			places.append(Vector3(local.x, terrain.height_at(world.x, world.y) - level + 0.02, local.y))
+			customs.append(Color(rng.randf() * TAU, rng.randf() * TAU, clampf(rng.randfn(0.40, 0.10), 0.16, 0.72), rng.randf()))
+	var multimesh := MultiMesh.new()
+	multimesh.transform_format = MultiMesh.TRANSFORM_3D
+	multimesh.use_custom_data = true
+	multimesh.mesh = blade
+	multimesh.instance_count = places.size()
+	var buffer := PackedFloat32Array()
+	buffer.resize(places.size() * 16)
+	for i in places.size():
+		var offset := i * 16
+		var point := places[i]
+		var custom := customs[i]
+		buffer[offset] = 1.0
+		buffer[offset + 3] = point.x
+		buffer[offset + 5] = 1.0
+		buffer[offset + 7] = point.y
+		buffer[offset + 10] = 1.0
+		buffer[offset + 11] = point.z
+		buffer[offset + 12] = custom.r
+		buffer[offset + 13] = custom.g
+		buffer[offset + 14] = custom.b
+		buffer[offset + 15] = custom.a
+	multimesh.buffer = buffer
+	var field := GRASS_FIELD.new()
+	field.name = "Grass_" + site_name
+	field.terrain = terrain
+	field.material = grass_material
+	field.position = Vector3(center.x, level, center.y)
+	var instances := MultiMeshInstance3D.new()
+	instances.multimesh = multimesh
+	instances.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	field.add_child(instances)
+	add_child(field)
+
+func _grass_blocked(point: Vector2, site_name: String) -> bool:
+	for segment: PackedVector2Array in pedestrian_segments:
+		if _distance_to_segment(point, segment[0], segment[1]) < 1.7:
+			return true
+	for descriptor: Dictionary in habitat_descriptors:
+		if descriptor.site != site_name:
+			continue
+		var kind: String = descriptor.kind
+		var size: Array = dimensions[kind].size_m
+		var half := Vector2(float(size[0]), float(size[2])) * 0.5 + Vector2.ONE * 0.7
+		if kind == "block-of-flats":
+			half *= 1.2
+		elif kind.begins_with("park-"):
+			half = Vector2.ONE * 2.4
+		var local: Vector2 = (point - Vector2(descriptor.point)).rotated(-float(descriptor.yaw))
+		if absf(local.x) <= half.x and absf(local.y) <= half.y:
+			return true
+	return false
+
+func _distance_to_segment(point: Vector2, a: Vector2, b: Vector2) -> float:
+	var delta := b - a
+	if delta.length_squared() < 0.0001:
+		return point.distance_to(a)
+	var t := clampf((point - a).dot(delta) / delta.length_squared(), 0.0, 1.0)
+	return point.distance_to(a + delta * t)
 
 ## A habitat-tunnel.glb module (prepared by
 ## tools/prepare_tycho_habitat_tunnel.py from the Meshy "Lunar Habitat

@@ -16,6 +16,14 @@ Pojedyncze konwersje assetów Tycho zapisuje się w `tools/` jako `prepare_tycho
 
 Opis normalizacji, źródeł i właściwe komendy `blender --background --python tools/...` trzyma [godot/assets/colonies/tycho/README.md](../godot/assets/colonies/tycho/README.md). Nie rozszerzaj sekcji „Rebuild game copies with” o historyczne `bench`/`book`/`seating`/`station`, gdy zmiana dotyczy wyłącznie nowych assetów.
 
+## Zabudowa i zieleń sfer Tycho
+
+`tycho_east_annex.gd` buduje pełną dzielnicę D2 z siedmioma wieżowcami, twin-houses, L-shaped oraz parkiem z ośmioma sosnami i ośmioma brzozami. Minisfera m1 mieści dziewięć szklarni i małą zabudowę, m2 ma dwa twin-houses i L-shaped, a m3 zachowuje tylko taki sam zestaw trzech małych domów odsunięty od dużego jeziora.
+
+W D1 pozostają wyłącznie buki i brzozy; sosny są wyróżnikiem parku D2. D2, m1, m2 i m3 mają trawnik z proceduralnymi źdźbłami oraz szerokie na 2,4 m ciągi piesze dochodzące do środka każdej sfery i przechodzące przez tunele; odcinek w m3 jest pomostem nad jeziorem, a w tunelu D1–m3 korzysta z suchego pasa obok potoku.
+
+Test układu: `Godot --headless --path godot --script res://tests/tycho_east_annex_test.gd`. Sprawdza dokładne liczby budynków i drzew, obecność trawy, dojście alejek do wszystkich czterech nowych centrów oraz brak trawy w niecce jeziora.
+
 Git (`origin/main`, `git@github.com:MemeticWars/moonwalk.git`) trzyma tylko kod: `godot/scripts`, `godot/scenes`, `godot/shaders`, `godot/addons`, `docs/`, `tools/*.py`, `tools/*.mjs`, `README.md`. Google Drive trzyma `godot/assets/`, `source_data/` i `artifacts/sprites/`; link do folderu jest w `.env` pod kluczem `google_drive` — nie wypisuj zawartości `.env` w czacie ani w commitach. Silnik (`tools/godot/`) nie jest w żadnym z nich, to zwykła dystrybucja 4.6.1 z godotengine.org.
 
 Przed dodaniem nowego dużego pliku do `godot/assets/` sprawdź, czy istnieje faktyczna referencja `res://...` w `scripts`/`scenes`/`shaders`. Jeśli nie — to wejście dla narzędzia (`tools/`), miejsce dla niego jest `source_data/`; tak przeniesiono `godot/assets/moon/dem_real` do `source_data/dem_real/{tycho,south_pole}`, bo `bake_sector_dtm.mjs` używa go offline, a gra nigdy. Kafle terenu (`godot/assets/sectors/*`, `godot/assets/moon/meso/`) to po kilka tysięcy małych plików — zawsze pakuj je w `.zip` przed wysyłką na Drive (`Compress-Archive`), odbiorca rozpakowuje do folderu o nazwie archiwum.

@@ -146,7 +146,7 @@ func _layout() -> void:
 	_place("radio-mast", -83, 12)
 	_place("radio-mast", 83, 12)
 	_place("radio-mast", 0, 78)
-	# A dense west garden; the east lawn stays completely open for future glasshouses.
+	# A dense west garden of beeches and birches; pines belong to D2's park.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4311
 	var size_rng := RandomNumberGenerator.new()
@@ -164,13 +164,9 @@ func _layout() -> void:
 	for x in [-11.0, -16.0, -21.0, -26.0]:
 		var row := 0
 		for z in [-76.0, -68.0, -60.0, -52.0, -44.0, -36.0, -28.0, -20.0, -12.0]:
-			# Birches form the exposed north-west outer edge. Pine and beech then
-			# occupy two compact interior groves instead of alternating tree-by-tree.
-			var kind := "park-beech"
-			if column == 3 or (row == 0 and column < 3):
-				kind = "park-birch" # 9 west-edge + 3 north-edge = 12
-			elif row >= 1 and row <= 6 and (column == 1 or column == 2):
-				kind = "park-pine" # central 2 x 6 grove
+			# Alternate by compact two-column groves: D1 intentionally contains
+			# only beeches and birches, while D2 carries birches and pines.
+			var kind := "park-birch" if column >= 2 else "park-beech"
 			_place(kind, x + rng.randf_range(-0.8, 0.8), z + rng.randf_range(-1.1, 1.1), rng.randf() * TAU)
 			# Natural, bounded size distribution: sigma 15% around each species'
 			# authored Tycho scale, without extreme outliers clipping the dome.

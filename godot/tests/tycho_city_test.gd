@@ -99,11 +99,11 @@ func run() -> void:
 					crop_panel_count += 1
 			check(crop_panel_count == 5,
 				"Each greenhouse must have a centred tomato cluster and single plants at all four ends")
-	check(species.get("park-birch", 0) == 12 and species.get("park-pine", 0) == 12 and species.get("park-beech", 0) == 12,
-		"West garden must mix birch, pine and beech evenly")
+	check(species.get("park-birch", 0) == 18 and species.get("park-pine", 0) == 0 and species.get("park-beech", 0) == 18,
+		"D1 west garden must contain only birches and beeches")
 	check(beech_bark_silvers.size() == 4 and beech_leaf_greens.size() == 4,
 		"Beeches must have silver bark/branches and four green leaf shades")
-	check(pine_count == 12, "Twelve pines must retain their separate brown trunk and green needle meshes")
+	check(pine_count == 0, "Pines must be reserved for D2")
 	var scale_mean := 0.0
 	for tree_scale in tree_scales:
 		scale_mean += tree_scale
