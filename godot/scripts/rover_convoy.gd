@@ -32,12 +32,33 @@ func _ready() -> void:
 func _spawn_trucks() -> void:
 	while not rover.rig_ready:
 		await get_tree().process_frame
+	var stands := PackedVector3Array()
+	var departure := rover.global_basis.z
+	var city: Node = game.surface.get_node_or_null("TychoCity")
+	if city != null:
+		# TychoCity builds CityPaths/TychoCosmoport lazily from its own _process(),
+		# not from _ready(), so it may not exist on the frame the rover becomes
+		# ready. Give it a couple of seconds before falling back to a bare offset.
+		var wait_frames := 0
+		var port: Node = null
+		while wait_frames < 240:
+			port = city.get_node_or_null("CityPaths/TychoCosmoport")
+			if port != null and port.has_method("truck_stands_global") and not port.truck_stands_global().is_empty():
+				break
+			port = null
+			await get_tree().process_frame
+			wait_frames += 1
+		if port != null:
+			stands = port.truck_stands_global()
+			departure = port.truck_departure_global()
 	for i in 2:
 		var truck := Truck.new()
 		truck.terrain = game.terrain
 		truck.controlled = true
-		var start := rover.global_position + rover.global_basis.z * (12.0 * (i + 1))
-		truck.set_patrol_route(PackedVector3Array([start, start, start - rover.global_basis.z * 10]))
+		var start := stands[i] if i < stands.size() else rover.global_position + rover.global_basis.z * (22.0 * (i + 1))
+		# _route_point(0) reads route[route_index] (1 after set_patrol_route), so
+		# the spawn point must be duplicated at index 0 and 1, not just index 0.
+		truck.set_patrol_route(PackedVector3Array([start, start, start + departure * 24.0]))
 		game.surface.add_child(truck)
 		trucks.append(truck)
 		paths.append([])
@@ -46,7 +67,9 @@ func _spawn_trucks() -> void:
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.physical_keycode == KEY_F and not actor.paused and not game.map_mode:
+		# E is the common nearby interaction key: a bench uses it through
+		# moonwalk.gd when no rover interaction claims the event.
+		if event.physical_keycode == KEY_E and not actor.paused and not game.map_mode and (driving or actor.global_position.distance_to(rover.global_position) < 8):
 			if driving:
 				_exit_rover()
 			elif actor.global_position.distance_to(rover.global_position) < 8 and not actor.sitting and not actor.climb_active:
@@ -147,7 +170,7 @@ func _physics_process(delta: float) -> void:
 				rover.drive_throttle = 0
 				rover.drive_brake = true
 				notice = "Konwój czeka na drona — sprawdź przejazd za łazikiem"
-	label.text = ("LORRY  %.1f km/h\nW/S: napęd / wstecz • A/D: skręt • Spacja: hamulec\nF: wysiądź • L: światła • Esc: pauza\nDrony transportowe: %d\n%s" % [rover.linear_velocity.length() * 3.6, trucks.size(), notice]) if driving else ("F: wsiądź do Lorry" if actor.global_position.distance_to(rover.global_position) < 8 else "")
+	label.text = ("LORRY  %.1f km/h\nW/S: napęd / wstecz • A/D: skręt • Spacja: hamulec\nE: wysiądź • L: światła • Esc: pauza\nDrony transportowe: %d\n%s" % [rover.linear_velocity.length() * 3.6, trucks.size(), notice]) if driving else ("E: wsiądź do Lorry" if actor.global_position.distance_to(rover.global_position) < 8 else "")
 
 func _follow(i: int, suspended: bool) -> void:
 	var truck := trucks[i]
@@ -167,7 +190,7 @@ func _follow(i: int, suspended: bool) -> void:
 		return
 	var speed := truck.linear_velocity.length()
 	var gap := truck.global_position.distance_to(leader.global_position)
-	var safe_gap := 10.0 + speed * 1.5 + speed * speed / (2 * 0.8 * 1.62)
+	var safe_gap := 24.0 + speed * 1.5 + speed * speed / (2 * 0.8 * 1.62)
 	if gap < safe_gap or leader.linear_velocity.dot(-leader.global_basis.z) < -0.2:
 		return
 	var target: Vector3 = path[0]

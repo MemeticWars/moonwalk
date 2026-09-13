@@ -367,7 +367,7 @@ func _drive(delta: float) -> void:
 			brake = traction / maxf(vwheels.size(), 1)
 		elif absf(speed) < speed_limit:
 			# VehicleBody's positive engine direction is +Z; this model faces -Z.
-			engine_force = -drive_throttle * minf(ENGINE_PULL, traction) / maxf(vwheels.size(), 1)
+			engine_force = -drive_throttle * minf(drive_engine_pull(), traction) / maxf(vwheels.size(), 1)
 		# Rolling resistance acts only on the ground, never as airborne drag.
 		var horizontal := Vector3(linear_velocity.x, 0, linear_velocity.z)
 		if horizontal.length() > 0.01:
@@ -389,6 +389,9 @@ func _build_track_renderer() -> void:
 	track_instances.multimesh = track_multimesh
 	track_instances.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	track_root.add_child(track_instances)
+
+func drive_engine_pull() -> float:
+	return ENGINE_PULL
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_L:

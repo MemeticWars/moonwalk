@@ -1,6 +1,11 @@
 extends "res://scripts/lunar_lorry.gd"
-## Eight-wheel unmanned cargo rover, using the same physical drive as Lorry.
-const TRUCK_SCENE := preload("res://assets/track/lunar_support_rover_lod.glb")
+## Textured unmanned cargo rover, using the same physical drive as Lorry.
+# This GLB carries its three JPEG maps and matching UVs internally. The former
+# segmented support-rover GLB only contained vertex colours, so borrowing this
+# material for it would have produced a scrambled texture.
+const TRUCK_SCENE := preload("res://assets/lorry/lunar_logistics_rover_baked.glb")
+const LENGTH_M := 12.0
+const TRUCK_WHEELS := ["mesh_0", "mesh_5", "mesh_9", "mesh_10"]
 
 func _build_visuals() -> void:
 	model = TRUCK_SCENE.instantiate()
@@ -8,38 +13,37 @@ func _build_visuals() -> void:
 	var box := _combined_aabb(_all_meshes(model))
 	if box.size.x > box.size.z:
 		model.rotation.y = -PI * 0.5
-	model.scale *= 6.0 / maxf(box.size.x, box.size.z)
+	# These are freight haulers, twice the original support-rover scale.
+	model.scale *= LENGTH_M / maxf(box.size.x, box.size.z)
 	box = _combined_aabb(_all_meshes(model))
 	model.position -= Vector3(box.get_center().x, box.position.y, box.get_center().z)
 
 func _wheel_mesh_names() -> Array:
-	# Godot's GLTF importer strips the special "wheel" suffix from these names.
-	return ["track_00", "track_01", "track_02", "track_03",
-		"track_04", "track_05", "track_06", "track_07"]
+	return TRUCK_WHEELS
 
 func _fit_pod() -> void:
 	pass
 
+func drive_engine_pull() -> float:
+	# This donor model has four wheels, not eight, but doubling every hull
+	# dimension still gives an 8x loaded mass; keep the same low lunar
+	# acceleration as the small Lorry, while wheel traction remains the limit.
+	return ENGINE_PULL * 8.0
+
 func _place_collider_and_mass() -> void:
-	var meshes := [_named(model, "track_chassis"), _named(model, "track_cabin")]
-	var bounds := AABB()
-	var first := true
-	for mesh: MeshInstance3D in meshes:
-		for i in 8:
-			var p := to_local(mesh.global_transform * mesh.mesh.get_aabb().get_endpoint(i))
-			if first:
-				bounds = AABB(p, Vector3.ZERO)
-				first = false
-			else:
-				bounds = bounds.expand(p)
+	# The baked donor has a single textured body spread over several meshes.
+	# Its complete bounds give a reliable hull envelope; reduce it enough that
+	# the wheel rays, not the box, remain responsible for ground contact.
+	var bounds := _combined_aabb(_all_meshes(model))
 	var shape := BoxShape3D.new()
-	shape.size = bounds.size * Vector3(0.9, 0.85, 0.95)
+	shape.size = bounds.size * Vector3(0.88, 0.54, 0.90)
 	var collider := CollisionShape3D.new()
 	collider.shape = shape
-	collider.position = bounds.get_center()
+	collider.position = bounds.get_center() + Vector3(0.0, bounds.size.y * 0.18, 0.0)
 	add_child(collider)
 	center_of_mass = Vector3(0, wheel_radius, 0)
-	mass = 3600.0
+	# Doubling every dimension gives approximately eight times the loaded mass.
+	mass = 28800.0
 	for wheel in vwheels:
 		wheel.suspension_max_force = mass * LUNAR_GRAVITY * 3.0 / vwheels.size()
 

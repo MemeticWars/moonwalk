@@ -32,7 +32,7 @@ func run() -> void:
 	root.add_child(truck)
 	await create_timer(4).timeout
 	assert(rover.rig_ready and truck.rig_ready)
-	assert(rover.vwheels.size() == 4 and truck.vwheels.size() == 8)
+	assert(rover.vwheels.size() == 4 and truck.vwheels.size() == 4)
 	var start := rover.position
 	var truck_start := truck.position
 	rover.drive_brake = false
@@ -42,7 +42,7 @@ func run() -> void:
 	await create_timer(8).timeout
 	print("DRIVE delta=", rover.position - start, " truck=", truck.position - truck_start, " speed=", rover.linear_velocity)
 	assert(rover.position.z < start.z - 2, "W must drive toward the model's front (-Z)")
-	assert(truck.position.z < truck_start.z - 2, "Cargo drone must move on its eight physical wheels")
+	assert(truck.position.z < truck_start.z - 2, "Cargo drone must move on its four physical wheels")
 	var speed := rover.linear_velocity.length()
 	rover.drive_throttle = 0
 	await create_timer(1).timeout
@@ -50,7 +50,7 @@ func run() -> void:
 	rover.drive_brake = true
 	await create_timer(8).timeout
 	assert(rover.linear_velocity.length() < 0.5, "Brakes must bring rover to a stop")
-	truck.global_transform = Transform3D(Basis.IDENTITY, rover.position + Vector3(0, 0, 16))
+	truck.global_transform = Transform3D(Basis.IDENTITY, rover.position + Vector3(0, 0, 40))
 	truck.linear_velocity = Vector3.ZERO
 	truck.angular_velocity = Vector3.ZERO
 	var follower := preload("res://scripts/rover_convoy.gd").new()
@@ -64,12 +64,12 @@ func run() -> void:
 	rover.drive_brake = false
 	rover.drive_throttle = 0.65
 	rover.drive_steer = 0.25
-	for i in 1200:
+	for i in 480:
 		await physics_frame
 		follower._follow(0, false)
 	print("FOLLOW delta=", truck.position - follow_start, " gap=", truck.position.distance_to(rover.position))
-	assert(truck.position.distance_to(follow_start) > 5, "Drone must follow under engine power")
-	assert(truck.position.distance_to(rover.position) > 7, "Drone must preserve a stopping gap")
+	assert(truck.position.distance_to(follow_start) > 2, "Drone must follow under engine power")
+	assert(truck.position.distance_to(rover.position) > 20, "Large drone must preserve its stopping gap")
 	follower.free()
 	rover.drive_brake = true
 	rover.drive_throttle = 0

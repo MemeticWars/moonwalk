@@ -11,11 +11,32 @@ const HOPPER := "res://assets/colonies/tycho/modules/delivery-hopper.glb"
 ## _build_paths()'s gate/apron add_city_pad calls) before this node samples
 ## the ground here.
 const APRON_RADIUS := 52.0
+const TRUCK_PARKING_WIDTH := 44.0
+const TRUCK_PARKING_LENGTH := 42.0
+const TRUCK_PARKING_SLOT_WIDTH := 16.0
+const TRUCK_PARKING_SLOT_LENGTH := 28.0
 
 var terrain: Node3D
 var gate_dir := Vector2(0.0, -1.0)       # unit XZ from the dome centre toward the gate
 var highway_dir := Vector2(0.0, -1.0)    # baked highway heading, cosmoport-local XZ
 var highway_origin := Vector2(0.0, 0.0)  # highway centreline = origin + highway_dir * station_m
+var truck_stands := PackedVector3Array()
+var truck_departure := Vector3.FORWARD
+var test_mode := false
+
+func truck_parking_center(gate: Vector2, highway: Vector2) -> Vector2:
+	var side := Vector2(-highway.normalized().y, highway.normalized().x)
+	# Outside the portal, beside its approach road and safely short of the motorway.
+	return gate.normalized() * 132.0 + side * 35.0
+
+func truck_stands_global() -> PackedVector3Array:
+	var result := PackedVector3Array()
+	for stand in truck_stands:
+		result.append(to_global(stand))
+	return result
+
+func truck_departure_global() -> Vector3:
+	return (global_transform.basis * truck_departure).normalized()
 
 func _ready() -> void:
 	name = "TychoCosmoport"
@@ -30,6 +51,10 @@ func _ready() -> void:
 	var hazard := _mat(Color("d8b53a"), 0.1, 0.7)
 
 	var apron_top := 0.28
+	var parking_c := Vector3(truck_parking_center(gate_dir, highway_dir).x, 0.0, truck_parking_center(gate_dir, highway_dir).y)
+	# The pad is registered before its deck and collision are made. This prevents
+	# the large trucks from spawning with half their wheels over an ungraded slope.
+	terrain.add_city_pad(Vector2(position.x + parking_c.x, position.z + parking_c.z), 38.0, 30.0, 80.0, position.y)
 
 	# --- Forecourt at the dome gate. It is an access road, not motorway pavement.
 	_slab(o + hwy * 64.0 + gate * 5.0, gate, 22.0, 32.0, 0.12, concrete, true)
@@ -53,6 +78,16 @@ func _ready() -> void:
 		var t := float(k) / 20.0
 		access.append(gate_exit.bezier_interpolate(gate_exit + gate * access_handle, access_end - hwy * access_handle, access_end, t))
 	_ribbon(access, 11.0, concrete)
+
+	# --- Freight staging outside the airlock. Two 12 m autonomous haulers fit
+	#     side by side without occupying the portal or the access-road centreline.
+	_slab(parking_c, gate, TRUCK_PARKING_WIDTH, TRUCK_PARKING_LENGTH, 0.16, pad_mat, true)
+	truck_departure = gate
+	for side_sign in [-1.0, 1.0]:
+		var stand: Vector3 = parking_c + hwy_side * side_sign * (TRUCK_PARKING_SLOT_WIDTH * 0.58)
+		truck_stands.append(stand + Vector3.UP * 0.24)
+		_slot_outline(stand + Vector3.UP * 0.17, gate, TRUCK_PARKING_SLOT_WIDTH, TRUCK_PARKING_SLOT_LENGTH, hazard)
+		_lamp(stand + hwy_side * (TRUCK_PARKING_SLOT_WIDTH * 0.5 + 2.0) + Vector3.UP * 0.16)
 
 	# --- Curved off-ramp leaves the opposite side of the same opening and sweeps
 	#     out toward the apron. No motorway rail crosses either local road.
@@ -115,7 +150,16 @@ func _ready() -> void:
 # ---------------------------------------------------------------- helpers
 
 func _load_prop(path: String, regen_normals: bool) -> Node3D:
-	var inst := (load(path) as PackedScene).instantiate() as Node3D
+	var inst: Node3D
+	if test_mode:
+		inst = Node3D.new()
+		var preview := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = Vector3(12.0, 6.0, 12.0)
+		preview.mesh = box
+		inst.add_child(preview)
+	else:
+		inst = (load(path) as PackedScene).instantiate() as Node3D
 	add_child(inst)
 	var meshes: Array = inst.find_children("*", "MeshInstance3D", true, false)
 	if regen_normals:
@@ -185,6 +229,19 @@ func _slab(centre: Vector3, dir: Vector3, width: float, length: float, thickness
 	add_child(mi)
 	if collide:
 		_body_box(centre + Vector3.UP * (thickness * 0.5), Vector3(width, thickness + 0.3, length), mi.rotation.y)
+
+func _slot_outline(centre: Vector3, dir: Vector3, width: float, length: float, mat: Material) -> void:
+	var side := Vector3(-dir.z, 0.0, dir.x).normalized()
+	for offset in [-width * 0.5, width * 0.5]:
+		var stripe := MeshInstance3D.new()
+		var mesh := BoxMesh.new()
+		mesh.size = Vector3(0.18, 0.025, length)
+		mesh.material = mat
+		stripe.mesh = mesh
+		stripe.position = centre + side * offset
+		stripe.rotation.y = atan2(dir.x, dir.z)
+		stripe.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(stripe)
 
 func _ribbon(points: Array[Vector3], width: float, mat: Material) -> void:
 	# A driveable deck along a polyline: one shallow rotated box per segment, with
