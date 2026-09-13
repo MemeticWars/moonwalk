@@ -8,7 +8,17 @@ Gra opowiada o kurierze InPost na Księżycu po wojnie odcinającej kolonie od Z
 
 ## Współpraca agentów
 
-Nad tym repozytorium jednocześnie pracują agenci Codex oraz Claude. Zmiany należy ograniczać do własnego zadania, sprawdzać stan Git przed edycją i nie nadpisywać bieżącej pracy drugiego agenta; Godota do automatycznej pracy uruchamiaj przez `--headless`, a gdy potrzebny jest render okienkowy, dodaj `--agent-run`, aby nie przechwytywać kursora użytkownika. Szczegóły zasad współpracy są w [index/collaboration.md](index/collaboration.md).
+Nad tym repozytorium jednocześnie pracują agenci Codex oraz Claude. Zmiany należy ograniczać do własnego zadania, sprawdzać stan Git przed edycją i nie nadpisywać bieżącej pracy drugiego agenta; `--agent-run` jest argumentem użytkownika rozpoznawanym przez skrypty gry, który pozostawia widoczny i nieograniczony kursor podczas renderu okienkowego. Szczegóły zasad współpracy, trybu `--agent-run` i zasad uruchamiania Godota są w [index/collaboration.md](index/collaboration.md).
+
+### Aktywna praca
+
+Przed rozpoczęciem zadania dopisz wiersz do tabeli, a po scommitowaniu lub porzuceniu pracy natychmiast go usuń — pusta tabela jest stanem domyślnym, nie wyjątkiem.
+
+| Agent | Zakres (pliki/moduł/uruchomiony Godot) | Rozpoczęto (UTC) |
+|---|---|---|
+| Codex | uruchomiona gra Godot `--agent-run` dla użytkownika | 2026-09-13T16:40Z |
+
+Zasady: sprawdź tabelę, zanim zaczniesz edytować lub uruchomisz Godota — nakładający się zakres oznacza czekanie albo zawężenie się do rozłącznej części. Wpis obejmuje też dłuższe uruchomienie Godota (test, `--headless`, `--agent-run`), bo równoległe procesy Godota potrafią uszkodzić wspólny cache importu (`.godot/imported/`) i dawać fałszywe błędy kompilacji — nie tylko konflikt plików wymaga zgłoszenia. Wpis starszy niż ok. 2h bez aktualizacji traktuj jako potencjalnie porzucony, ale zweryfikuj to (`git log`, `git status`) zamiast go po prostu kasować. Po nieudanym teście z `assert()` proces Godota zwykle się nie kończy sam — ubij go, zanim zwolnisz swój wiersz.
 
 ## Autostrady między lokacjami
 
@@ -24,7 +34,7 @@ Gra działa w Godot 4.6.1 i streamuje lokalny sektor księżycowy wokół aktywn
 
 ## Pojazdy i konwój
 
-Agnes może prowadzić Lorry po wejściu klawiszem F, a za łazikiem jadą dwa ośmiokołowe drony transportowe. Pojazdy korzystają z fizyki księżycowej, ograniczonej przyczepności oraz wspólnego sterowania napędem, a drony śledzą trasę poprzednika i zachowują odstęp. Szczegóły sterowania, implementacji i testów są w [index/vehicles.md](index/vehicles.md).
+Agnes może prowadzić Lorry po wejściu klawiszem E, a za łazikiem jadą dwa czterokołowe, teksturowane drony transportowe, parkujące na wyznaczonych stanowiskach przy śluzie Tycho. Pojazdy korzystają z fizyki księżycowej, ograniczonej przyczepności oraz wspólnego sterowania napędem, a drony śledzą trasę poprzednika i zachowują odstęp. Szczegóły sterowania, implementacji i testów są w [index/vehicles.md](index/vehicles.md).
 
 ## Ciągłość terenu
 

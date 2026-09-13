@@ -16,6 +16,13 @@ Repozytorium jest wspólnym obszarem pracy agentów Codex i Claude. Zmiany jedne
 4. Uruchamiaj tylko testy właściwe dla zmienionego obszaru i podawaj ich wynik. Nie poprawiaj przy okazji niezwiązanych błędów testów; odnotuj je jako istniejące poza zakresem.
 5. Jeśli zlecona praca prowadzi do konfliktu z bieżącym kodem lub nieukończoną zmianą drugiego agenta, a nie da się go bezpiecznie rozdzielić małym patchem, agent odmawia wykonania tej części zadania i podaje plik oraz fragment stanowiący konflikt. Nie wymusza scalenia, nie nadpisuje pracy drugiego agenta i nie zgaduje jej zamierzonego zachowania.
 6. Automatyczne testy Godota uruchamiaj przez `--headless`. Gdy konieczny jest render w oknie, dodaj argument użytkownika `--agent-run`; nie uruchamiaj gry w zwykłym trybie interaktywnym, ponieważ może przejąć kursor użytkownika.
+7. Przed dłuższym uruchomieniem Godota (test, `--headless`, `--agent-run`) sprawdź tabelę „Aktywna praca” w `AGENTS.md` i dopisz do niej swój wiersz — równoległe procesy Godota potrafią uszkodzić wspólny cache importu (`.godot/imported/`), co objawia się fałszywymi błędami kompilacji lub crashem silnika niezwiązanym z żadną realną zmianą w kodzie. Nieudany `assert()` w GDScripcie nie kończy procesu automatycznie; po takim teście ubij go ręcznie, zanim uruchomisz kolejny.
+
+## `--agent-run`
+
+`--agent-run` jest argumentem użytkownika projektu, a nie przełącznikiem silnika Godot. Podczas okienkowego uruchomienia informuje `moonwalk.gd` i kontrolery postaci, że proces należy do agenta: gra nie przechwytuje, nie ukrywa ani nie ogranicza kursora do swojego okna.
+
+Stosuj go wyłącznie, gdy rzeczywiście potrzebny jest render lub ręczne obejrzenie sceny; testy bez obrazu nadal uruchamiaj przez `--headless`. Przykład: `Godot --path godot --agent-run`; proces należy wpisać do tabeli aktywnej pracy przed startem i zakończyć przed usunięciem wpisu.
 
 ## Commity i przekazanie pracy
 
