@@ -1,11 +1,15 @@
 extends Node3D
 ## Hopper landing field just outside the Tycho dome, beside the highway gate.
 ## Everything is in the city-pad local frame (origin at Site.CENTER, y = 0 at
-## city_level); the caller positions the node. No rockets here -- this is a
-## short-range surface delivery port: one logistics-base building and two hopper pads.
+## city_level); the caller positions the node. Mostly a short-range surface
+## delivery port -- one logistics-base building and two hopper pads -- plus
+## one InPost cargo lander parked on the base building's own launch pad (the
+## round "R1" deck baked into cosmoport.glb, beside its tower/mast cluster).
 
 const BASE := "res://assets/colonies/tycho/modules/cosmoport.glb"
 const HOPPER := "res://assets/colonies/tycho/modules/delivery-hopper.glb"
+const ROCKET := "res://assets/colonies/tycho/modules/rocket_lunar_cargo_transport.glb"
+const ROCKET_HEIGHT_M := 22.0
 ## Landing apron radius, in the same cosmoport-local frame as highway_origin --
 ## exposed so tycho_city.gd can grade a matching terrain pad for it (see
 ## _build_paths()'s gate/apron add_city_pad calls) before this node samples
@@ -113,6 +117,27 @@ func _ready() -> void:
 	base.position = base_c + Vector3.UP * (apron_top - raw.position.y * bscale)
 	base.rotation.y = atan2(hwy_side.x, hwy_side.z)  # face back toward the highway
 	_body_box(base_c + Vector3.UP * (apron_top + raw.size.y * bscale * 0.5), Vector3(raw.size.x * bscale, raw.size.y * bscale + 1.0, raw.size.z * bscale), base.rotation.y)
+
+	# --- InPost cargo lander, parked on cosmoport.glb's own "R1" launch pad
+	# (the round deck with the recessed exhaust pit), right beside the tower/
+	# mast cluster baked into the same mesh. (0.45, -0.157, -0.02) is that
+	# pad's flat deck in the base model's raw local space -- found by sampling
+	# the mesh's own vertex positions there (dense, consistent readings
+	# clustered around y=-0.14..-0.22, clear of both the pit and the mast) --
+	# base.to_global() carries it through the building's placement, rotation
+	# and bscale for free, so it stays glued to the pad if any of those change.
+	var rocket := _load_prop(ROCKET, false)
+	var rraw := _bounds(rocket)
+	var rscale := ROCKET_HEIGHT_M / maxf(rraw.size.y, 0.000000001)
+	rocket.scale = Vector3.ONE * rscale
+	var pad_point: Vector3 = base.to_global(Vector3(0.45, -0.157, -0.02))
+	# rraw.position.y is the model's lowest point (its landing legs) measured
+	# from its own local origin -- negative, so the origin sits above the
+	# legs; subtracting it (scaled) raises the origin by that much so the
+	# legs, not the origin, end up resting on the pad.
+	rocket.position = Vector3(pad_point.x, pad_point.y - rraw.position.y * rscale, pad_point.z)
+	rocket.rotation.y = base.rotation.y
+	_body_box(rocket.position + Vector3.UP * (rraw.size.y * rscale * 0.45), Vector3(rraw.size.x * rscale + 0.4, rraw.size.y * rscale, rraw.size.z * rscale + 0.4), rocket.rotation.y)
 
 	# --- Two hopper pads on the highway side of the apron, each with a parked hopper.
 	for s: float in [-1.0, 1.0]:
