@@ -28,6 +28,14 @@ func run() -> void:
 	assert(stands[0].distance_to(Vector3.ZERO) > 100.0, "Parking must stay outside the airlock")
 	var parking_bodies: Array = port.find_children("*", "StaticBody3D", true, false)
 	assert(parking_bodies.size() > 0, "Parking deck must have collision")
+	var rocket := port.get_node_or_null("CargoRocket") as Node3D
+	assert(rocket != null, "Cosmoport must create its cargo rocket")
+	var rocket_bounds := port._bounds(rocket)
+	var rocket_bottom := rocket.position.y + rocket_bounds.position.y * rocket.scale.y
+	assert(is_equal_approx(rocket_bottom, 10.0), "Rocket legs must stay ten metres above ground")
+	var apron_c := Vector3(-9, 0.0, -39) + Vector3(0.2239, 0.0, -0.9746).normalized() * 150.0 + Vector3(0.9746, 0.0, 0.2239).normalized() * 95.0
+	assert(Vector2(rocket.position.x, rocket.position.z).distance_to(Vector2(apron_c.x, apron_c.z)) < 0.01,
+		"Rocket must be centred on the octagonal landing apron")
 	var truck := preload("res://scripts/lunar_truck.gd").new()
 	truck.terrain = terrain
 	root.add_child(truck)
