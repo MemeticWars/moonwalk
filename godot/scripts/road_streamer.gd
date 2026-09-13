@@ -8,19 +8,6 @@ const TILE := 64.0
 const NEAR_RADIUS := 2
 const FAR_RADIUS := 4
 const MAX_GRADE := 0.06
-## Sanity bound for how steep real lunar terrain can plausibly get, not a
-## limit this highway ever tries to match. Apollo-era soil-mechanics samples
-## put the lunar regolith's angle of repose at roughly 30-50 deg depending on
-## grain shape/depth; LOLA slope statistics show the vast majority of the
-## surface under ~35 deg, with steeper faces confined to fresh, localised
-## crater walls/scarps rather than the kind of extended terrain a road runs
-## across. 35 deg (~70% grade) is used here as that "typical stable maximum".
-## It matters because it is well above MAX_GRADE (6%, an engineering choice
-## for a driveable road, same order as a real highway) -- so real ground can
-## legitimately climb faster than this road is allowed to follow. When it
-## does, the deck must go elevated on piers rather than either hugging the
-## slope (breaking MAX_GRADE) or getting left buried under it.
-const MAX_NATURAL_SLOPE_DEG := 35.0
 const PLANNING_STEP := 8.0
 const PLANNING_MARGIN := 64.0
 const SLOPE_COST := 22.0
@@ -30,6 +17,16 @@ const DETOUR_SLOPE := 0.06
 const DETOUR_HOLLOW := 3.0
 const SAMPLE_STEP := 4.0
 const SECTOR_REACH := 1400.0
+## A long natural slope is climbed on the ground with switchbacks. The target
+## stays below MAX_GRADE so rounding the bends and small DEM irregularities do
+## not immediately turn the whole climb back into a viaduct.
+const SWITCHBACK_TARGET_GRADE := 0.045
+const SWITCHBACK_TRIGGER_GRADE := 0.055
+const SWITCHBACK_OFFSET := 240.0
+const SWITCHBACK_MAX_LEGS := 31
+const SWITCHBACK_LEAD := 180.0
+const SWITCHBACK_ROUNDING_ALLOWANCE := 2.2
+const BRIDGE_MAX_RUN := 320.0
 ## Beyond the collision-streamed sector, retain a sparse visible continuation
 ## of every strategic road. It avoids creating thousands of physics panels.
 const FAR_LOD_REACH := 20000.0
@@ -57,6 +54,8 @@ var ground_exits: Array[Dictionary] = []
 var full_segment_count := 0
 var far_segment_count := 0
 var far_lod: Node3D
+var far_grounding_by_route: Dictionary = {}
+var build_interchanges := true
 
 func _ready() -> void:
 	name = "RoadStreamer"
@@ -64,7 +63,9 @@ func _ready() -> void:
 	var data: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://assets/moon/colonies.json"))
 	world_routes = Network.build(data.locations)
 	_bake_sector_routes()
-	preload("res://scripts/highway_interchange.gd").build(self)
+	if build_interchanges:
+		preload("res://scripts/highway_interchange.gd").build(self)
+	_register_main_road_cuts()
 	lamp_descriptors_by_tile = Lamps.layout(descriptors_by_tile, lane_width + 0.4, lamp_min_station_by_route)
 	_build_far_lod()
 	center = terrain.center
@@ -140,6 +141,7 @@ func _build_far_lod() -> void:
 	far_lod = Node3D.new()
 	far_lod.name = "FarHighwayLOD"
 	add_child(far_lod)
+	far_grounding_by_route.clear()
 	var origin := town_square_origin()
 	for route: Dictionary in world_routes:
 		if route.from != active_colony and route.to != active_colony:
@@ -159,41 +161,63 @@ func _build_far_lod() -> void:
 		if reach <= start_distance + 1.0:
 			continue
 		var segments: Array = []
-		var count := ceili((reach - start_distance) / FAR_LOD_STEP)
-		var right2d := Vector2(-direction.y, direction.x)
 		var half_width := lane_width + 0.4
-		# Required height at each station, sampled across the FULL deck width
-		# (not just the centreline) -- real lunar cross-slope near a crater
-		# rim/peak can tilt the ground enough, over just this width, that a
-		# centreline-only sample leaves the uphill lane buried in it.
-		var points2d: Array[Vector2] = [Vector2(first.x, first.z)]
+		var far_goal := origin + direction * reach
+		var alignment: Array[Vector2] = [Vector2(first.x, first.z)]
+		var direct_start := alignment[0]
+		var chunk_count := maxi(1, ceili(direct_start.distance_to(far_goal) / SECTOR_REACH))
+		for chunk in range(chunk_count):
+			var chunk_goal := direct_start.lerp(far_goal, float(chunk + 1) / float(chunk_count))
+			# Far LOD is visual-only and spans tens of kilometres. Give broad
+			# elevation changes the same switchback treatment without running a
+			# large A* search for every unseen kilometre-sized chunk.
+			var leg := _switchback_waypoints(alignment.back(), chunk_goal)
+			if leg.is_empty():
+				leg = [chunk_goal]
+			for point: Vector2 in leg:
+				if alignment.back().distance_to(point) > 0.5:
+					alignment.append(point)
+		var far_curve := Curve3D.new()
+		far_curve.bake_interval = FAR_LOD_STEP
+		for point: Vector2 in alignment:
+			far_curve.add_point(Vector3(point.x, 0.0, point.y))
+		var far_length := far_curve.get_baked_length()
+		var count := maxi(1, ceili(far_length / FAR_LOD_STEP))
+		# Required visual height at each far station.
+		var points2d: Array[Vector2] = []
 		var heights := PackedFloat32Array([first.y])
-		for i in range(1, count + 1):
-			var station := minf(reach, start_distance + FAR_LOD_STEP * float(i))
-			var point_2d := origin + direction * station
-			var required := -INF
-			for across in range(-3, 4):
-				var p := point_2d + right2d * half_width * float(across) / 3.0
-				required = maxf(required, terrain.height_at(p.x, p.y) + 0.15)
+		for i in range(count + 1):
+			var sample := far_curve.sample_baked(far_length * float(i) / float(count))
+			var point_2d := Vector2(sample.x, sample.z)
 			points2d.append(point_2d)
+			if i == 0:
+				continue
+			# At long-distance LOD the terrain and road are both visual-only. Use
+			# the centreline datum so cross-slope cannot lift the entire ribbon;
+			# detailed shoulder cuts are created when this region becomes local.
+			var required: float = terrain.height_at(point_2d.x, point_2d.y) + 0.15
 			heights.append(required)
-		# Two-sided max-grade envelope, same technique _bake_route uses: only
-		# ever raises a station's height, so a slope steeper than MAX_GRADE
-		# (well within what real lunar terrain can do -- see
-		# MAX_NATURAL_SLOPE_DEG above) lifts the deck onto piers instead of
-		# either breaking the grade limit or ending up under the regolith.
-		for i in range(1, heights.size()):
-			heights[i] = maxf(heights[i], heights[i - 1] - MAX_GRADE * points2d[i].distance_to(points2d[i - 1]))
-		for i in range(heights.size() - 2, -1, -1):
-			heights[i] = maxf(heights[i], heights[i + 1] - MAX_GRADE * points2d[i].distance_to(points2d[i + 1]))
+		# This continuation is visual-only. Limit bridge influence to a local
+		# run: a crater lip may carry the deck across its nearby hollow, but it
+		# must never lift the remaining tens of kilometres of road.
+		heights = _bridge_local_hollows(heights, points2d)
 		var previous := Vector3(points2d[0].x, heights[0], points2d[0].y)
 		for i in range(1, heights.size()):
 			var current := Vector3(points2d[i].x, heights[i], points2d[i].y)
 			var tangent := (current - previous).normalized()
 			var right := tangent.cross(Vector3.UP).normalized()
-			segments.append({"index": i - 1, "a": previous, "b": current, "ra": right, "rb": right, "na": Vector3.UP, "nb": Vector3.UP, "position": (previous + current) * 0.5, "route": route.id, "paint": false, "rails": true, "half_width": half_width, "clearance": current.y - terrain.height_at(current.x, current.z)})
+			segments.append({"index": i - 1, "a": previous, "b": current, "ra": right, "rb": right, "na": Vector3.UP, "nb": Vector3.UP, "position": (previous + current) * 0.5, "route": route.id, "paint": false, "rails": true, "half_width": half_width, "clearance": current.y - terrain.height_at(current.x, current.z), "support_stride": 1})
 			previous = current
 		if not segments.is_empty():
+			var clearances: Array[float] = []
+			for segment: Dictionary in segments:
+				clearances.append(float(segment.clearance))
+			clearances.sort()
+			far_grounding_by_route[route.id] = {
+				"segments": segments.size(),
+				"median_clearance": clearances[clearances.size() / 2],
+				"max_clearance": clearances.back(),
+			}
 			var visual := MeshInstance3D.new()
 			visual.name = "FarDeck_" + route.id
 			visual.mesh = HighwayMesh.deck(segments, half_width)
@@ -225,6 +249,9 @@ func _plan_ground_leg(start: Vector2, goal: Vector2) -> Array[Vector2]:
 	# A connection is straight by default. The graph search is reserved for a
 	# genuinely hazardous feature, rather than letting small DEM noise turn a
 	# city-to-city route into a wandering path.
+	var switchbacks := _switchback_waypoints(start, goal)
+	if not switchbacks.is_empty():
+		return switchbacks
 	if not _leg_needs_detour(start, goal):
 		return [goal]
 	var low := start.min(goal) - Vector2.ONE * PLANNING_MARGIN
@@ -269,6 +296,49 @@ func _plan_ground_leg(start: Vector2, goal: Vector2) -> Array[Vector2]:
 		path[0] = start
 		path[path.size() - 1] = goal
 	return path
+
+func _switchback_waypoints(start: Vector2, goal: Vector2) -> Array[Vector2]:
+	var direct_distance := start.distance_to(goal)
+	if direct_distance < 1.0:
+		return []
+	var rise := absf(terrain.height_at(goal.x, goal.y) - terrain.height_at(start.x, start.y))
+	if rise / direct_distance <= SWITCHBACK_TRIGGER_GRADE:
+		return []
+	var required_length := rise / SWITCHBACK_TARGET_GRADE
+	var direction := (goal - start) / direct_distance
+	var side := Vector2(-direction.y, direction.x)
+	var lead := minf(SWITCHBACK_LEAD, direct_distance * 0.2)
+	var inner_start := start + direction * lead
+	var inner_distance := direct_distance - lead * 2.0
+	# Use the fewest broad traverses that provide enough climbing distance.
+	# Odd leg counts put the final traverse on the opposite side of the first,
+	# making the alignment balanced around its strategic centreline.
+	var leg_count := 3
+	while leg_count < SWITCHBACK_MAX_LEGS and lead * 2.0 + _switchback_length(inner_distance, SWITCHBACK_OFFSET, leg_count) < required_length * SWITCHBACK_ROUNDING_ALLOWANCE:
+		leg_count += 2
+	var result: Array[Vector2] = [inner_start]
+	for i in range(1, leg_count):
+		var along := inner_distance * float(i) / float(leg_count)
+		var sign_value := 1.0 if i % 2 == 1 else -1.0
+		result.append(inner_start + direction * along + side * SWITCHBACK_OFFSET * sign_value)
+	result.append(goal - direction * lead)
+	result.append(goal)
+	return result
+
+func _register_main_road_cuts() -> void:
+	if not terrain.has_method("add_road_cut"):
+		return
+	for segments: Array in descriptors_by_tile.values():
+		for segment: Dictionary in segments:
+			terrain.add_road_cut(segment.a, segment.b, lane_width + 0.4)
+	if terrain.has_method("refresh_road_grading"):
+		terrain.refresh_road_grading()
+
+func _switchback_length(direct_distance: float, offset: float, leg_count: int) -> float:
+	var along := direct_distance / float(leg_count)
+	if leg_count <= 1:
+		return direct_distance
+	return 2.0 * Vector2(along, offset).length() + float(leg_count - 2) * Vector2(along, offset * 2.0).length()
 
 func _leg_needs_detour(start: Vector2, goal: Vector2) -> bool:
 	var distance := start.distance_to(goal)
@@ -339,11 +409,14 @@ func _bake_route(route_id: String, points: Array[Vector2], surface_offset: float
 		var tangent := (samples[mini(i + 1, count)] - samples[maxi(0, i - 1)]).normalized()
 		var right := tangent.cross(Vector3.UP).normalized()
 		rights.append(right)
-		var required := -INF
-		# Check the full carriageway width, not just the centreline.
+		var required := 0.0
+		# Fit to the mean cross-section. The terrain pass cuts the uphill shoulder
+		# down to the deck; using the highest edge as the whole profile's datum
+		# made every road on a side slope float above its centreline.
 		for across in range(-8, 9):
 			var p := samples[i] + right * (lane_width + 0.4) * float(across) / 8.0
-			required = maxf(required, terrain.height_at(p.x, p.z) + surface_offset)
+			required += terrain.height_at(p.x, p.z) + surface_offset
+		required /= 17.0
 		# Near a pinned colony pad, blend the road down onto the pad level so the
 		# spur arrives at town level instead of on a viaduct.
 		if not ground_pin.is_empty():
@@ -351,22 +424,16 @@ func _bake_route(route_id: String, points: Array[Vector2], surface_offset: float
 			var blend := smoothstep(ground_pin.radius * 0.5, ground_pin.radius, d)
 			required = lerpf(ground_pin.level + surface_offset, required, blend)
 		heights.append(required)
-	# Two-sided clearance envelope limits grade in BOTH travel directions.
-	for i in range(1, heights.size()):
-		heights[i] = maxf(heights[i], heights[i - 1] - MAX_GRADE * samples[i].distance_to(samples[i - 1]))
-	for i in range(heights.size() - 2, -1, -1):
-		heights[i] = maxf(heights[i], heights[i + 1] - MAX_GRADE * samples[i].distance_to(samples[i + 1]))
-	var smoothed := PackedFloat32Array()
-	for i in heights.size():
-		var h := 0.0
-		for offset in range(-6, 7):
-			h += heights[clampi(i + offset, 0, heights.size() - 1)] / 13.0
-		smoothed.append(h)
-	var lift := 0.0
-	for i in heights.size():
-		lift = maxf(lift, heights[i] - smoothed[i])
+	# Fit the road around the natural surface instead of treating every crest as
+	# an inviolable floor. High spots become shallow cuttings, low spots become
+	# short supported spans, and broad elevation changes are handled by the
+	# switchback alignment above.
+	heights = _fit_ground_profile(heights, samples)
 	for i in samples.size():
-		samples[i].y = smoothed[i] + lift
+		# A former smoothing pass restored clearance by adding its single worst
+		# error to every sample, lifting kilometres of otherwise flat road because
+		# of one remote bump. The fitted cut/fill profile needs no global lift.
+		samples[i].y = heights[i]
 	# Nail the pinned end onto the pad, then let the ramp climb away toward the
 	# baked profile no faster than MAX_GRADE so the transition itself stays in
 	# spec (a plain distance-blend would re-introduce grade where the pad level
@@ -409,6 +476,60 @@ func _bake_route(route_id: String, points: Array[Vector2], surface_offset: float
 		if not descriptors_by_tile.has(key):
 			descriptors_by_tile[key] = []
 		descriptors_by_tile[key].append(descriptor)
+
+func _fit_ground_profile(required: PackedFloat32Array, samples: PackedVector3Array) -> PackedFloat32Array:
+	# Each directional pass is independently grade-safe. Their average is also
+	# grade-safe (the constraint is convex), while cancelling the tendency of a
+	# one-way pass to drag a remote crest or hollow through the entire route.
+	var forward := required.duplicate()
+	for i in range(1, forward.size()):
+		var limit := MAX_GRADE * samples[i].distance_to(samples[i - 1])
+		forward[i] = clampf(required[i], forward[i - 1] - limit, forward[i - 1] + limit)
+	var backward := required.duplicate()
+	for i in range(backward.size() - 2, -1, -1):
+		var limit := MAX_GRADE * samples[i].distance_to(samples[i + 1])
+		backward[i] = clampf(required[i], backward[i + 1] - limit, backward[i + 1] + limit)
+	# Pick one global blend for the whole route. Every such blend remains
+	# grade-safe; minimizing the median absolute earthwork keeps most stations
+	# on grade while allowing balanced local cuts and supported fills.
+	var forward_weight := 0.5
+	var best_median_error := INF
+	for candidate_index in 41:
+		var candidate := float(candidate_index) / 40.0
+		var errors: Array[float] = []
+		for i in required.size():
+			errors.append(absf(lerpf(backward[i], forward[i], candidate) - required[i]))
+		errors.sort()
+		var median_error: float = errors[errors.size() / 2]
+		if median_error < best_median_error:
+			best_median_error = median_error
+			forward_weight = candidate
+	var profile := PackedFloat32Array()
+	profile.resize(required.size())
+	for i in required.size():
+		profile[i] = lerpf(backward[i], forward[i], forward_weight)
+	return profile
+
+func _bridge_local_hollows(required: PackedFloat32Array, points: Array[Vector2]) -> PackedFloat32Array:
+	var profile := required.duplicate()
+	# Only bridge a point when there are compatible ground anchors on both
+	# sides. A one-sided peak is a slope to follow (with switchbacks), not a
+	# reason to project a viaduct hundreds of metres into the distance.
+	var radius_limit := maxi(1, ceili(BRIDGE_MAX_RUN / FAR_LOD_STEP))
+	for i in range(1, required.size() - 1):
+		for radius in range(1, radius_limit + 1):
+			var left := i - radius
+			var right := i + radius
+			if left < 0 or right >= required.size():
+				break
+			var span := points[left].distance_to(points[right])
+			if span > BRIDGE_MAX_RUN * 2.0:
+				break
+			if absf(required[right] - required[left]) / maxf(0.01, span) > MAX_GRADE:
+				continue
+			var t := points[left].distance_to(points[i]) / maxf(0.01, span)
+			profile[i] = maxf(profile[i], lerpf(required[left], required[right], t))
+	return profile
 
 func _sync_tiles() -> void:
 	if terrain == null:

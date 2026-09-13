@@ -69,7 +69,9 @@ static func fittings(parent: Node3D, s: Dictionary, half_width: float, near: boo
 			beam(parent, a + Vector3.UP * height, b + Vector3.UP * height, 0.10, STEEL)
 		if near:
 			beam(parent, a, a + Vector3.UP * 1.15, 0.12, STEEL)
-	if int(s.index) % 8 == 4 and s.clearance > 1.4:
+	var support_stride := maxi(1, int(s.get("support_stride", 8)))
+	var support_phase := support_stride / 2
+	if int(s.index) % support_stride == support_phase and s.clearance > 1.4:
 		var top: Vector3 = s.position - Vector3.UP * THICKNESS
 		beam(parent, top, top - Vector3.UP * (s.clearance - THICKNESS), 0.8, CONCRETE)
 		var shoulder: Vector3 = (s.ra + s.rb).normalized() * half_width * 0.8
