@@ -2,6 +2,7 @@ extends Node3D
 ## Full-detail source modules share resources; Godot generates mesh LODs.
 ## Only buildings in the active terrain tile neighbourhood are instantiated.
 const Site := preload("res://scripts/tycho_site.gd")
+const WaterLayout := preload("res://scripts/tycho_water_layout.gd")
 const Cosmoport := preload("res://scripts/tycho_cosmoport.gd")
 const Dome := preload("res://scripts/tycho_dome.gd")
 const ASSETS := "res://assets/colonies/tycho/modules/"
@@ -50,32 +51,14 @@ const TUNNEL_GAP := 20.0
 ## so the dome-wall opening clears the widened tunnel model on every side.
 const TUNNEL_HALF_WIDTH := 3.6
 const TUNNEL_CUT_HEIGHT := 7.2
-## Park pond -> stream -> m2 fish pond (tycho_water_feature.gd). Kept here,
+## Park pond -> stream -> m3 fish pond (tycho_water_feature.gd). Kept here,
 ## alongside the other site constants, so _build_grass() below can carve
 ## matching keep-outs out of the lawn's MultiMesh grass.
-const POND1_CENTER := Site.CENTER + Vector2(-18.0, -4.0)
-const POND1_RADII := Vector2(4.5, 3.2)
-## Now that m2/D2 sit south instead of west, the stream is routed south too:
-## out of the park, past the central-house's west edge, around the west
-## block-of-flats tower arm (which hugs the dome wall from roughly due-east
-## to due-west of straight south, leaving the direct south corridor -- where
-## the m2 tunnel opening actually is -- clear), then straight down the
-## middle to the D1/tunnel/m2 wall openings.
-const STREAM_WAYPOINTS: Array[Vector2] = [
-	Site.CENTER + Vector2(-18.0, 0.0),
-	Site.CENTER + Vector2(-25.0, 5.0),
-	Site.CENTER + Vector2(-32.0, 20.0),
-	Site.CENTER + Vector2(-45.0, 50.0),
-	Site.CENTER + Vector2(-45.0, 68.0),
-	Site.CENTER + Vector2(-20.0, 85.0),
-	Site.CENTER + Vector2(-5.0, 95.0),
-	Site.CENTER + Vector2(0.0, 99.0),
-	Site.CENTER + Vector2(0.0, 110.0),
-	Site.CENTER + Vector2(0.0, 121.0),
-	Site.CENTER + Vector2(0.0, 150.0),
-]
-const STREAM_WIDTH := 2.4
-const POND2_RADII := Vector2(32.0, 18.0)
+const POND1_CENTER := WaterLayout.POND1_CENTER
+const POND1_RADII := WaterLayout.POND1_RADII
+## Rounded route and bed depths are shared with lunar_terrain.gd via WaterLayout.
+const STREAM_WIDTH := WaterLayout.STREAM_WIDTH
+const POND2_RADII := WaterLayout.POND2_RADII
 
 ## m1/m2/m3 sit due east/south/west of D1 -- exactly on the dome's own
 ## triangulation grid (multiples of TAU/Dome.SECTORS), same as the highway
@@ -114,7 +97,7 @@ func _ready() -> void:
 		var annex := annex_script.new() as Node3D
 		annex.terrain = terrain
 		add_child(annex)
-	# Also optional/independent: the park pond -> stream -> m2 fish pond,
+	# Also optional/independent: the park pond -> stream -> m3 fish pond,
 	# gated (in addition to its own distance check) on the east annex having
 	# already graded m2's pad.
 	var water_script: Script = load("res://scripts/tycho_water_feature.gd") as Script
@@ -713,27 +696,68 @@ func _build_paths() -> void:
 ## A green ground disc across the whole flattened pad, under the grass so the
 ## gaps between blades read green instead of regolith. Roads draw on top of it.
 func _add_city_lawn() -> void:
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color("35502c")
+	mat.vertex_color_use_as_albedo = true
 	mat.roughness = 1.0
-	st.set_material(mat)
-	var segments := 72
-	var radius := 93.0
-	for i in segments:
-		var a0 := TAU * float(i) / float(segments)
-		var a1 := TAU * float(i + 1) / float(segments)
-		st.add_vertex(Vector3.ZERO)
-		st.add_vertex(Vector3(radius * cos(a0), 0.0, radius * sin(a0)))
-		st.add_vertex(Vector3(radius * cos(a1), 0.0, radius * sin(a1)))
+	# Match the ground's world-aligned grid and refined channel cells. A flat
+	# fan across the park used to seal the excavated basin visually.
+	var vertices := PackedVector3Array()
+	var colors := PackedColorArray()
+	var indices := PackedInt32Array()
+	for z in range(floori((Site.CENTER.y-93)/2), ceili((Site.CENTER.y+93)/2)):
+		for x in range(floori((Site.CENTER.x-93)/2), ceili((Site.CENTER.x+93)/2)):
+			var origin := Vector2(x,z)*2.0
+			if (origin + Vector2.ONE - Site.CENTER).length() > 92.0:
+				continue
+			var step := WaterLayout.cell_step(origin + Vector2.ONE)
+			var n := roundi(2.0/step)
+			var base := vertices.size()
+			for j in n+1:
+				for i in n+1:
+					var p := origin + Vector2(i,j)*step
+					var h: float = terrain._ground_vertex_height(p.x,p.y,step)
+					vertices.append(Vector3(p.x-Site.CENTER.x,h-terrain.city_level+0.015,p.y-Site.CENTER.y))
+					colors.append(Color("65584a") if WaterLayout.depth(p) > 0.01 else Color("35502c"))
+			for j in n:
+				for i in n:
+					var v := base+j*(n+1)+i
+					indices.append_array(PackedInt32Array([v,v+1,v+n+1,v+1,v+n+2,v+n+1]))
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_COLOR] = colors
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	var st := SurfaceTool.new()
+	st.create_from(mesh,0)
 	st.generate_normals()
 	var disc := MeshInstance3D.new()
 	disc.name = "CityLawn"
 	disc.mesh = st.commit()
-	disc.position = Vector3(Site.CENTER.x, terrain.city_level + 0.015, Site.CENTER.y)
+	disc.material_override = mat
+	disc.position = Vector3(Site.CENTER.x, terrain.city_level, Site.CENTER.y)
 	disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	ground_details.add_child(disc)
+	# The existing service lane crosses the brook at x=-30, z=-11.
+	# A real deck collider keeps pedestrians above the narrow channel.
+	var bridge := StaticBody3D.new()
+	bridge.name = "BrookFootbridge"
+	bridge.position = Vector3(Site.CENTER.x-30, terrain.city_level, Site.CENTER.y-11)
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(5.0, 0.10, 1.4)
+	var collision := CollisionShape3D.new()
+	collision.shape = shape
+	bridge.add_child(collision)
+	var deck := MeshInstance3D.new()
+	var deck_mesh := BoxMesh.new()
+	deck_mesh.size = shape.size
+	deck.mesh = deck_mesh
+	var deck_material := StandardMaterial3D.new()
+	deck_material.albedo_color = Color("74777a")
+	deck.material_override = deck_material
+	bridge.add_child(deck)
+	ground_details.add_child(bridge)
 
 func _build_grass(roads: Array) -> void:
 	# One blade = a 2 cm wide quad. Per-instance custom data carries heading, wind
@@ -781,10 +805,6 @@ func _build_grass(roads: Array) -> void:
 	box_h.append(POND1_RADII + Vector2(0.6, 0.6))
 	box_cos.append(1.0)
 	box_sin.append(0.0)
-	var stream_segments: Array[Vector2] = []
-	for i in range(STREAM_WAYPOINTS.size() - 1):
-		stream_segments.append(STREAM_WAYPOINTS[i] - Site.CENTER)
-		stream_segments.append(STREAM_WAYPOINTS[i + 1] - Site.CENTER)
 	const STREAM_CLEARANCE := STREAM_WIDTH * 0.5 + 0.6
 
 	var grown_roads: Array[Rect2] = []
@@ -830,11 +850,8 @@ func _build_grass(roads: Array) -> void:
 					break
 			if blocked:
 				continue
-			for si in range(0, stream_segments.size(), 2):
-				var closest: Vector2 = Geometry2D.get_closest_point_to_segment(here, stream_segments[si], stream_segments[si + 1])
-				if here.distance_to(closest) < STREAM_CLEARANCE:
-					blocked = true
-					break
+			if WaterLayout.stream_distance(here + Site.CENTER) < STREAM_CLEARANCE:
+				blocked = true
 			if blocked:
 				continue
 			places.append(Vector3(lx, 0.02, lz))

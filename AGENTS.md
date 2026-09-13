@@ -16,7 +16,7 @@ Przed rozpoczęciem zadania dopisz wiersz do tabeli, a po scommitowaniu lub porz
 
 | Agent | Zakres (pliki/moduł/uruchomiony Godot) | Rozpoczęto (UTC) |
 |---|---|---|
-| Codex | uruchomiona gra Godot `--agent-run` dla użytkownika | 2026-09-13T16:40Z |
+| _(brak aktywnej pracy)_ | | |
 
 Zasady: sprawdź tabelę, zanim zaczniesz edytować lub uruchomisz Godota — nakładający się zakres oznacza czekanie albo zawężenie się do rozłącznej części. Wpis obejmuje też dłuższe uruchomienie Godota (test, `--headless`, `--agent-run`), bo równoległe procesy Godota potrafią uszkodzić wspólny cache importu (`.godot/imported/`) i dawać fałszywe błędy kompilacji — nie tylko konflikt plików wymaga zgłoszenia. Wpis starszy niż ok. 2h bez aktualizacji traktuj jako potencjalnie porzucony, ale zweryfikuj to (`git log`, `git status`) zamiast go po prostu kasować. Po nieudanym teście z `assert()` proces Godota zwykle się nie kończy sam — ubij go, zanim zwolnisz swój wiersz.
 
@@ -39,6 +39,10 @@ Agnes może prowadzić Lorry po wejściu klawiszem E, a za łazikiem jadą dwa c
 ## Ciągłość terenu
 
 Geometria terenu i wspólne krawędzie kafli muszą być deterministyczne dla tych samych danych oraz poziomów LOD, niezależnie od kolejności wczytywania. Wyrównania pod zabudowę wymagają aktualizacji już utworzonych siatek i kolizji, a horyzont nie może nakładać większych kafli na lokalny grunt. Szczegóły implementacji i testów są w [index/terrain.md](index/terrain.md).
+
+## Stawy i potok Tycho
+
+Stawy w D1 i m3 mają rzeczywiste niecki głębokie odpowiednio na 1 m i 1,5 m, a łączący je potok ma przekrój U, szerokość 50 cm i głębokość 50 cm. Deterministyczna trasa z zaokrąglonymi zakrętami omija zabudowę i biegnie przez tunel D1–m3 przy jednej ścianie, obok uliczki dla pieszych szerokiej na 2,4 m. Szczegóły geometrii, kolizji, wspólnych danych i testów są w [index/water.md](index/water.md).
 
 ## Narzędzia assetów Tycho
 

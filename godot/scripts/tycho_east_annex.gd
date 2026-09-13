@@ -9,8 +9,8 @@ extends Node3D
 ## Connection graph: m1-D1, m2-D1, m3-D1, m2-D2 -- D2 sits further south,
 ## beyond m2, and only m2 bridges the two big domes.
 ##
-## Mini/D2 building placement is paused for now (m2, the south mini-dome,
-## is getting a pond+stream feature next) -- every dome here is currently
+## Mini/D2 building placement is paused for now (m3, the west mini-dome,
+## holds the excavated fish pond) -- every dome here is currently
 ## an empty shell plus its tunnel. _build_d2_habitat()/_build_mini_habitat()
 ## are kept below, unused, to restore later.
 ##
@@ -23,6 +23,7 @@ extends Node3D
 ## needs matching cuts toward m1/m2/m3.
 const City := preload("res://scripts/tycho_city.gd")
 const Site := preload("res://scripts/tycho_site.gd")
+const WaterLayout := preload("res://scripts/tycho_water_layout.gd")
 const ASSETS := "res://assets/colonies/tycho/modules/"
 ## Due north (m3's old slot) is no longer free: tycho_city.gd now grades its
 ## own gate/forecourt/junction and cosmoport-apron pads there (the real
@@ -74,7 +75,7 @@ func _build() -> void:
 	# pad's own independently-surveyed local median, which used to differ
 	# by several metres pad to pad on the nominally flat crater floor) --
 	# one shared plane keeps every tunnel level end to end and keeps the
-	# park pond -> stream -> m2 pond water feature at one consistent height.
+	# park pond -> stream -> m3 pond water feature at one consistent height.
 	var d1_level: float = terrain.city_level
 	var d2_level: float = terrain.add_city_pad(City.D2_CENTER, City.D2_RADIUS, 45.0, 80.0, d1_level)
 	var m1_level: float = terrain.add_city_pad(City.M1_CENTER, City.MINI_RADIUS, City.MINI_BLEND, 80.0, d1_level)
@@ -91,6 +92,7 @@ func _build() -> void:
 	_build_tunnel(Site.CENTER, d1_level, 100.0, City.M1_CENTER, m1_level, City.MINI_RADIUS)
 	_build_tunnel(Site.CENTER, d1_level, 100.0, City.M2_CENTER, m2_level, City.MINI_RADIUS)
 	_build_tunnel(Site.CENTER, d1_level, 100.0, City.M3_CENTER, m3_level, City.MINI_RADIUS)
+	_build_west_walkway(d1_level)
 	_build_tunnel(City.M2_CENTER, m2_level, City.MINI_RADIUS, City.D2_CENTER, d2_level, City.D2_RADIUS)
 	_build_solar_array()
 
@@ -213,6 +215,39 @@ func _build_tunnel(a_center: Vector2, a_level: float, a_radius: float, b_center:
 	light.omni_range = length * 0.8
 	light.position.y = CROSS_SECTION_SIDE * 0.5
 	node.add_child(light)
+
+func _build_west_walkway(level: float) -> void:
+	# Inside the west tunnel the brook follows the +Z wall (z=2.5 m).
+	# This dry street sits beside it and extends onto both dome approaches.
+	var street := StaticBody3D.new()
+	street.name = "WestTunnelWalkway"
+	street.position = Vector3(WaterLayout.WALKWAY_CENTER.x, level-0.035, WaterLayout.WALKWAY_CENTER.y)
+	var size := Vector3(WaterLayout.WALKWAY_SIZE.x,0.12,WaterLayout.WALKWAY_SIZE.y)
+	var shape := BoxShape3D.new()
+	shape.size = size
+	var collision := CollisionShape3D.new()
+	collision.shape = shape
+	street.add_child(collision)
+	var deck := MeshInstance3D.new()
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	deck.mesh = mesh
+	var concrete := StandardMaterial3D.new()
+	concrete.albedo_color = Color("96958d")
+	concrete.roughness = 0.92
+	deck.material_override = concrete
+	street.add_child(deck)
+	# A painted edge identifies the brook side without blocking passage.
+	var line := MeshInstance3D.new()
+	var stripe := BoxMesh.new()
+	stripe.size = Vector3(size.x,0.004,0.06)
+	line.mesh = stripe
+	line.position = Vector3(0,0.062,size.z*0.5-0.10)
+	var paint := StandardMaterial3D.new()
+	paint.albedo_color = Color("e6d9a4")
+	line.material_override = paint
+	street.add_child(line)
+	add_child(street)
 
 func _build_solar_array() -> void:
 	var panel_size: Array = dimensions["fotovoltaic-panels"].size_m

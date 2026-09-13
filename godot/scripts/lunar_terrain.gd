@@ -2,6 +2,7 @@ extends Node3D
 
 const ColonyUtil := preload("res://scripts/colony_util.gd")
 const TychoSite := preload("res://scripts/tycho_site.gd")
+const WaterLayout := preload("res://scripts/tycho_water_layout.gd")
 const MesoDEM := preload("res://scripts/lunar_meso_dem.gd")
 var city_enabled := false
 var city_level := 0.0
@@ -379,6 +380,9 @@ func raw_height(x: float, z: float) -> float:
 		var weight := (1.0 - smoothstep(ramp.width, ramp.width + 16.0, ramp.distance)) * smoothstep(-16.0, 0.0, ramp.along) * (1.0 - smoothstep(ramp.length + 20.0, ramp.length + 40.0, ramp.along))
 		var profile: float = ramp.height - 0.2 * (1.0 - smoothstep(ramp.length - 8.0, ramp.length, ramp.along))
 		result = lerpf(result, profile, weight)
+	if city_enabled:
+		result = lerpf(result, city_level, WaterLayout.west_passage_weight(point))
+		result -= WaterLayout.depth(point)
 	return result
 
 func road_reserved(x: float, z: float) -> bool:
@@ -405,19 +409,39 @@ func refresh_road_grading() -> void:
 
 func height_at(x: float, z: float) -> float:
 	# Same triangle interpolation as the rendered/collision mesh.
-	var gx := x / STEP
-	var gz := z / STEP
+	var sample_step := WaterLayout.cell_step(Vector2(x, z)) if city_enabled else STEP
+	var gx := x / sample_step
+	var gz := z / sample_step
 	var ix := floori(gx)
 	var iz := floori(gz)
 	var tx := gx - ix
 	var tz := gz - iz
-	var a := raw_height(ix * STEP, iz * STEP)
-	var b := raw_height((ix + 1) * STEP, iz * STEP)
-	var c := raw_height(ix * STEP, (iz + 1) * STEP)
-	var d := raw_height((ix + 1) * STEP, (iz + 1) * STEP)
+	var a := _ground_vertex_height(ix * sample_step, iz * sample_step, sample_step)
+	var b := _ground_vertex_height((ix + 1) * sample_step, iz * sample_step, sample_step)
+	var c := _ground_vertex_height(ix * sample_step, (iz + 1) * sample_step, sample_step)
+	var d := _ground_vertex_height((ix + 1) * sample_step, (iz + 1) * sample_step, sample_step)
 	if tx + tz <= 1:
 		return a + (b - a) * tx + (c - a) * tz
 	return d + (c - d) * (1 - tx) + (b - d) * (1 - tz)
+
+func _ground_vertex_height(x: float, z: float, sample_step: float) -> float:
+	# Fine edges interpolate the neighbouring coarse edge exactly: no cracks
+	# at pond/channel resolution changes, including across streamed tiles.
+	if city_enabled and sample_step < STEP:
+		var p := Vector2(x, z)
+		for axis in 2:
+			if absf(p[axis] / STEP - roundf(p[axis] / STEP)) > 0.00001:
+				continue
+			var offset := Vector2(0.001, 0) if axis == 0 else Vector2(0, 0.001)
+			var neighbour_step := maxf(WaterLayout.cell_step(p-offset), WaterLayout.cell_step(p+offset))
+			if neighbour_step > sample_step:
+				var along := 1-axis
+				var a := p
+				a[along] = floorf(p[along]/neighbour_step)*neighbour_step
+				var b := a
+				b[along] += neighbour_step
+				return lerpf(raw_height(a.x,a.y), raw_height(b.x,b.y), (p[along]-a[along])/neighbour_step)
+	return raw_height(x,z)
 
 func _build_ground(key: Vector2i, lod: int) -> Node3D:
 	var root := Node3D.new()
@@ -450,6 +474,27 @@ func _build_ground(key: Vector2i, lod: int) -> Node3D:
 	for z in cells:
 		for x in cells:
 			var a := z * (cells + 1) + x
+			var origin := Vector2(key.x * TILE + x * step, key.y * TILE + z * step)
+			var fine_step := WaterLayout.cell_step(origin + Vector2.ONE) if city_enabled else step
+			if fine_step < step:
+				var subdivisions := roundi(step / fine_step)
+				var base := vertices.size()
+				for fz in subdivisions + 1:
+					for fx in subdivisions + 1:
+						var p := origin + Vector2(fx, fz) * fine_step
+						var h := _ground_vertex_height(p.x, p.y, fine_step)
+						vertices.append(Vector3(p.x, h, p.y))
+						var dx := raw_height(p.x + fine_step, p.y) - raw_height(p.x - fine_step, p.y)
+						var dz := raw_height(p.x, p.y + fine_step) - raw_height(p.x, p.y - fine_step)
+						normals.append(Vector3(-dx, 2*fine_step, -dz).normalized())
+						uvs.append((p - Vector2(key) * TILE) / TILE)
+						colors.append(colors[a])
+						meso_heights.append(meso_heights[a])
+				for fz in subdivisions:
+					for fx in subdivisions:
+						var v := base + fz * (subdivisions+1) + fx
+						indices.append_array(PackedInt32Array([v, v+1, v+subdivisions+1, v+1, v+subdivisions+2, v+subdivisions+1]))
+				continue
 			indices.append_array(PackedInt32Array([a, a + 1, a + cells + 1, a + 1, a + cells + 2, a + cells + 1]))
 	# Downward skirts conceal cracks between unequal tessellation levels.
 	for side in 4:
@@ -462,6 +507,9 @@ func _build_ground(key: Vector2i, lod: int) -> Node3D:
 				2: a = cells * (cells + 1) + i + 1; b = a - 1
 				_: a = (i + 1) * (cells + 1); b = i * (cells + 1)
 			var idx := vertices.size()
+			var edge_center := (vertices[a] + vertices[b]) * 0.5
+			if city_enabled and WaterLayout.cell_step(Vector2(edge_center.x, edge_center.z)) < STEP:
+				continue # A coarse vertical skirt must not fill the carved waterway.
 			vertices.append_array(PackedVector3Array([vertices[a], vertices[b], vertices[a] - Vector3.UP * 6, vertices[b] - Vector3.UP * 6]))
 			colors.append_array(PackedColorArray([colors[a], colors[b], colors[a], colors[b]]))
 			normals.append_array(PackedVector3Array([normals[a], normals[b], normals[a], normals[b]]))
