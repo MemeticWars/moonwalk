@@ -15,6 +15,7 @@ const POND1_CENTER := City.POND1_CENTER
 const POND1_RADII := City.POND1_RADII
 const STREAM_WIDTH := City.STREAM_WIDTH
 const POND2_RADII := City.POND2_RADII
+const WATER_LEVEL_OFFSET := -0.125 # 10 cm below the previous -0.025 m surface.
 
 var terrain: Node3D
 var built := false
@@ -51,10 +52,12 @@ func _make_water_material() -> ShaderMaterial:
 	mat.shader = WATER_SHADER
 	# Keep the project's opaque water-shader fork: its lack of screen/depth
 	# reads makes the surface visible with the default outline effect.
-	mat.set_shader_parameter("albedo", Color(0.07, 0.34, 0.48, 0.92))
-	mat.set_shader_parameter("albedo_fresnel", Color(0.35, 0.68, 0.82, 1.0))
+	# Muted grey-green body colour and dark grazing angles, rather than a
+	# baked cyan sky tint. Direct lights still provide neutral specular glints.
+	mat.set_shader_parameter("albedo", Color(0.12, 0.145, 0.14, 1.0))
+	mat.set_shader_parameter("albedo_fresnel", Color(0.045, 0.05, 0.055, 1.0))
 	mat.set_shader_parameter("specular", 0.6)
-	mat.set_shader_parameter("roughness", 0.03)
+	mat.set_shader_parameter("roughness", 0.10)
 	mat.set_shader_parameter("metallic", 0.0)
 	mat.set_shader_parameter("vertex_displace_from_mesh_normal", true)
 	mat.set_shader_parameter("normal_wave_from_mesh_normal", true)
@@ -82,12 +85,12 @@ func _make_water_material() -> ShaderMaterial:
 	mat.set_shader_parameter("uv_blend_sharpness", 2.0)
 	mat.set_shader_parameter("uv_tri_scale", Vector3(6.0, 6.0, 6.0))
 	mat.set_shader_parameter("uv_tri_offset", Vector3.ZERO)
-	mat.set_shader_parameter("color_deep", Color(0.03, 0.12, 0.2, 1.0))
+	mat.set_shader_parameter("color_deep", Color(0.025, 0.035, 0.04, 1.0))
 	# Excavation is real geometry; colour remains independent of depth reads.
-	mat.set_shader_parameter("color_shallow", Color(0.07, 0.34, 0.48, 1.0))
+	mat.set_shader_parameter("color_shallow", Color(0.12, 0.145, 0.14, 1.0))
 	mat.set_shader_parameter("beers_law", 2.2)
 	mat.set_shader_parameter("depth_offset", -0.6)
-	mat.set_shader_parameter("albedo_snell", Color(0.0, 0.08, 0.18, 1.0))
+	mat.set_shader_parameter("albedo_snell", Color(0.025, 0.035, 0.04, 1.0))
 	mat.set_shader_parameter("snell_direction", Vector3(0, 1, 0))
 	mat.set_shader_parameter("snell_tightness", 0.6)
 	mat.set_shader_parameter("WaveCount", 3)
@@ -118,12 +121,12 @@ func _build() -> void:
 	_add_pond(POND1_CENTER, POND1_RADII, water_material)
 	_add_stream(water_material)
 	_add_pond(Layout.POND2_CENTER, POND2_RADII, water_material)
-	_add_fish(POND1_CENTER, POND1_RADII * 0.6, terrain.city_level - 0.30, 3)
-	_add_fish(Layout.POND2_CENTER, POND2_RADII * 0.6, terrain.city_level - 0.40, 7)
+	_add_fish(POND1_CENTER, POND1_RADII * 0.6, terrain.city_level + WATER_LEVEL_OFFSET - 0.275, 3)
+	_add_fish(Layout.POND2_CENTER, POND2_RADII * 0.6, terrain.city_level + WATER_LEVEL_OFFSET - 0.375, 7)
 	# The old free-roaming stream fish left the narrow curved channel.
 
 func _add_pond(center: Vector2, radii: Vector2, material: ShaderMaterial) -> void:
-	var level: float = terrain.city_level - 0.025
+	var level: float = terrain.city_level + WATER_LEVEL_OFFSET
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	st.set_material(material)
@@ -148,7 +151,7 @@ func _add_stream(material: ShaderMaterial) -> void:
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	st.set_material(material)
 	var origin := STREAM_WAYPOINTS[0]
-	var origin_y: float = terrain.city_level - 0.025
+	var origin_y: float = terrain.city_level + WATER_LEVEL_OFFSET
 	var prev_left := Vector3.ZERO
 	var prev_right := Vector3.ZERO
 	var have_prev := false

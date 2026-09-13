@@ -117,7 +117,7 @@ func run() -> void:
 	for node: MeshInstance3D in water.get_children():
 		var normals: PackedVector3Array = node.mesh.surface_get_arrays(0)[Mesh.ARRAY_NORMAL]
 		check(normals[0].y > 0.9, "Water faces upward: " + str(node.name))
-		check(absf(node.position.y-9.975)<0.001, "Water surface must stay above excavated bed")
+		check(absf(node.position.y-9.875)<0.001, "Ponds and brook must share the water level lowered by 10 cm")
 	water.free()
 	# Verify all fine/coarse cell transitions along the curved route.
 	for p: Vector2 in route:
