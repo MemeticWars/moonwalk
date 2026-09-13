@@ -158,11 +158,9 @@ func _build_highways() -> void:
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.albedo_color = Color("74d8ff")
 	for route: Dictionary in roads.world_routes:
-		var a: Vector3 = geo(route.a.latitude, route.a.longitude)
-		var b: Vector3 = geo(route.b.latitude, route.b.longitude)
 		mesh.surface_begin(Mesh.PRIMITIVE_LINE_STRIP, mat)
-		for i in range(65):
-			mesh.surface_add_vertex(a.slerp(b, float(i) / 64.0) * 1.012)
+		for point: Dictionary in route.points:
+			mesh.surface_add_vertex(geo(point.latitude, point.longitude) * 1.012)
 		mesh.surface_end()
 	highways = MeshInstance3D.new()
 	highways.name = "LunarHighways"

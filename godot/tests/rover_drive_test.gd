@@ -1,0 +1,83 @@
+extends SceneTree
+
+class FlatTerrain extends Node3D:
+	func height_at(_x: float, _z: float) -> float:
+		return 0.0
+	func has_ground(_point: Vector3) -> bool:
+		return true
+
+func _initialize() -> void:
+	run.call_deferred()
+
+func run() -> void:
+	var terrain := FlatTerrain.new()
+	root.add_child(terrain)
+	var body := StaticBody3D.new()
+	var collider := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(500, 1, 500)
+	collider.shape = box
+	body.position.y = -0.5
+	body.add_child(collider)
+	root.add_child(body)
+	var rover := preload("res://scripts/lunar_lorry.gd").new()
+	rover.terrain = terrain
+	rover.controlled = true
+	rover.set_patrol_route(PackedVector3Array([Vector3.ZERO, Vector3.ZERO, Vector3(0, 0, -20)]))
+	root.add_child(rover)
+	var truck := preload("res://scripts/lunar_truck.gd").new()
+	truck.terrain = terrain
+	truck.controlled = true
+	truck.set_patrol_route(PackedVector3Array([Vector3(12, 0, 0), Vector3(12, 0, 0), Vector3(12, 0, -20)]))
+	root.add_child(truck)
+	await create_timer(4).timeout
+	assert(rover.rig_ready and truck.rig_ready)
+	assert(rover.vwheels.size() == 4 and truck.vwheels.size() == 8)
+	var start := rover.position
+	var truck_start := truck.position
+	rover.drive_brake = false
+	rover.drive_throttle = 1
+	truck.drive_brake = false
+	truck.drive_throttle = 1
+	await create_timer(8).timeout
+	print("DRIVE delta=", rover.position - start, " truck=", truck.position - truck_start, " speed=", rover.linear_velocity)
+	assert(rover.position.z < start.z - 2, "W must drive toward the model's front (-Z)")
+	assert(truck.position.z < truck_start.z - 2, "Cargo drone must move on its eight physical wheels")
+	var speed := rover.linear_velocity.length()
+	rover.drive_throttle = 0
+	await create_timer(1).timeout
+	assert(rover.linear_velocity.length() > speed * 0.65, "Releasing throttle must preserve momentum")
+	rover.drive_brake = true
+	await create_timer(8).timeout
+	assert(rover.linear_velocity.length() < 0.5, "Brakes must bring rover to a stop")
+	truck.global_transform = Transform3D(Basis.IDENTITY, rover.position + Vector3(0, 0, 16))
+	truck.linear_velocity = Vector3.ZERO
+	truck.angular_velocity = Vector3.ZERO
+	var follower := preload("res://scripts/rover_convoy.gd").new()
+	follower.add_child(follower.camera)
+	follower.add_child(follower.label)
+	follower.rover = rover
+	follower.trucks.append(truck)
+	follower.paths.append([])
+	follower.last_leader.append(rover.position)
+	var follow_start := truck.position
+	rover.drive_brake = false
+	rover.drive_throttle = 0.65
+	rover.drive_steer = 0.25
+	for i in 1200:
+		await physics_frame
+		follower._follow(0, false)
+	print("FOLLOW delta=", truck.position - follow_start, " gap=", truck.position.distance_to(rover.position))
+	assert(truck.position.distance_to(follow_start) > 5, "Drone must follow under engine power")
+	assert(truck.position.distance_to(rover.position) > 7, "Drone must preserve a stopping gap")
+	follower.free()
+	rover.drive_brake = true
+	rover.drive_throttle = 0
+	# An airborne vehicle has no artificial drag or upright torque.
+	rover.position = Vector3(0, 30, 0)
+	rover.linear_velocity = Vector3(3, 0, 0)
+	await create_timer(1).timeout
+	assert(absf(rover.linear_velocity.y + 1.62) < 0.15, "Lunar ballistic acceleration must be 1.62 m/s2")
+	assert(absf(rover.linear_velocity.x - 3) < 0.1, "Vacuum must not slow horizontal flight")
+	print("ROVER DRIVE PASS: rigs, forward drive, coasting, brakes, lunar ballistics")
+	quit()

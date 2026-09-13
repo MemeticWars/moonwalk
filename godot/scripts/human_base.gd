@@ -60,9 +60,9 @@ var painterly_rect: ColorRect
 var painterly_style := 0
 const PAINTERLY_STYLES := ["Realistyczny", "Pastelowy", "Akwarela", "Farba olejna", "Tusz + akwarela"]
 const PAINTERLY_SHADER := preload("res://shaders/painterly_post.gdshader")
-var character_name := "Theia"
-var model_paths := ["res://assets/theia/theia_hooded_walking.glb", "res://assets/theia/Theia_hooded_RunFast_withSkin.glb", "res://assets/theia/Theia_Hooded_Turn_Left_withSkin.glb", "res://assets/theia/Theia_Hooded_Turn_Right_withSkin.glb"]
-var atlas_path := "res://assets/theia/theia_hooded_walking_texture_0.png"
+var character_name := "Human"
+var model_paths: Array[String] = []
+var atlas_path := ""
 
 func _ready() -> void:
 	name = character_name

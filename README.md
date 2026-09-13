@@ -43,7 +43,7 @@ Repozytorium git ([MemeticWars/moonwalk](https://github.com/MemeticWars/moonwalk
 
 | Ścieżka | Zawartość | Waga |
 |---|---|---|
-| `godot/assets/` | modele `.glb`, tekstury, kafle wysokości `.bin` (Agnes, Theia, lorry, moduły kolonii, teren mezo/regolit) — **faktycznie ładowane przez `res://` w scenach/skryptach** | ~2,1 GB |
+| `godot/assets/` | modele `.glb`, tekstury, kafle wysokości `.bin` (Agnes, łazik, moduły kolonii, teren mezo/regolit) — **faktycznie ładowane przez `res://` w scenach/skryptach** | ~2,1 GB |
 | `source_data/` | surowe wejście dla `tools/bake_sector_dtm.mjs`: GeoTIFF-y LOLA/LROC globalne (`ldem_64_uint.tif`, `ldem_4_uint.tif`, `lroc_color_poles_4k.tif`) oraz `dem_real/` — NAC DTM Tycho (2 m/px) i LOLA biegun południowy (5 m/px), nigdy nie wczytywane bezpośrednio przez grę, tylko przez narzędzie do bakowania sektorów | ~5,2 GB |
 | `artifacts/sprites/` | wyrenderowane podglądy/screenshoty odsyłaczy z tego README | ~1,3 GB |
 | `tools/SunshineClouds2-main.zip`, `tools/SunshineClouds2-source/` | oryginalne archiwum addona chmur (już wypakowane i używane z `godot/addons/SunshineClouds2/`, więc to tylko zbędna kopia źródła) | ~27 MB |
@@ -80,10 +80,10 @@ Bez kroku 2 projekt się otworzy i skrypty się skompilują, ale sceny będą po
 
 - Grywalny sektor przy **Silesii**, ze współrzędnymi roboczymi 82°S, 30°E. Punkt terenowy jest makietą do testowania skali i ruchu.
 - Lekki glob: prawdziwa mapa barw LROC 4096×2048, zachowana w pełnej rozdzielczości, i wysokości LOLA 1440×720. Model globu ma rzeczywistą proporcję reliefu, bez sztucznego powiększenia wysokości.
-- Materiał podłoża: drobny regolit, dwa rozmiary kamyków, wypukłość w skali świata, mapa szumu 2048² z mipmapami i filtrowaniem anizotropowym 16×. Drobne detale wygasają poniżej wielkości piksela. Theia używa współdzielonego atlasu 4K.
+- Materiał podłoża: drobny regolit, dwa rozmiary kamyków, wypukłość w skali świata, mapa szumu 2048² z mipmapami i filtrowaniem anizotropowym 16×. Drobne detale wygasają poniżej wielkości piksela. Agnes używa współdzielonego atlasu 4K.
 - Najgrubszy globalny DEM (4 piksele/stopień, ~7,6 km/piksel) pozostaje ostatecznym fallbackiem tam, gdzie brakuje kafla mezo. **Żaden z tych zbiorów to nie lokalny NAC DEM ani SLDEM2015.** Drobne kratery, skały i regolit w sektorze są proceduralną warstwą gry; mapa pokrycia jest klasyfikacją na podstawie nachylenia, nie pomiarem geologicznym.
 - Warstwa mezo: LOLA 64 px/stopień (~474 m/piksel na równiku), 23040×11520, pocięta na kafle 512×512 (uint16, offset −10000 m, krok 0,5 m) w `godot/assets/moon/meso`; wczytywana leniwie z dyskowym cache LRU (48 kafli, ~24 MiB) w `lunar_meso_dem.gd`. Siatka to sześciościenna quadtree zagęszczana wokół kamery (`lunar_orbit_lod.gd`, do poziomu 12); nowe kafle wyrastają z powierzchni rodzica do zmierzonej wysokości w 0,65 s (shader `meso.gdshader`), więc podejście z orbity do lokalnego terenu jest ciągłe — bez cięcia ekranu ani zmiany skali Księżyca. Przekazanie kamery lokalnemu terenowi następuje, gdy ślad kamery na gruncie mieści się już w całości w zdjętym obszarze 2 m (`lunar_terrain.survey_margin`), a nie na sztywnej wysokości — przy dużym zdjęciu (Tycho) dzieje się to już kilka kilometrów nad gruntem, bez lądowań poza zdjęciem (tam obowiązuje stały próg 240 m).
-- W ZIP-ie jest symulacja gospodarcza, nie gotowe lokacje 3D. Wczytano jej 14 publicznych lokacji i 21 tras do `assets/moon/colonies.json`. Glob pokazuje lokacje; trasy i gospodarka nie są jeszcze rozgrywką Godota. Theia pełni rolę postaci testowej zamiast docelowego Siwego-04.
+- W ZIP-ie jest symulacja gospodarcza, nie gotowe lokacje 3D. Wczytano jej 14 publicznych lokacji i 21 tras do `assets/moon/colonies.json`. Glob pokazuje lokacje; trasy i gospodarka nie są jeszcze rozgrywką Godota. Agnes jest jedyną grywalną postacią.
 - Przygotowano adapter GeoServera oraz klienta HTTP z cache. **Żaden rzeczywisty GeoServer ani lokalny NAC DEM nie jest jeszcze skonfigurowany.** Domyślnie działa wariant offline. Adresy, nazwy warstw i współrzędne konfiguracji serwera są przykładami.
 
 ## Streaming zamiast całego globu

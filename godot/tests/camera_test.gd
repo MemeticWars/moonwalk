@@ -14,7 +14,7 @@ func _run() -> void:
 	actor.set_control_scheme(true)
 	for mesh in actor.visuals[0].find_children("*", "MeshInstance3D", true, false):
 		var mat: StandardMaterial3D = mesh.get_active_material(0)
-		assert(not mat.emission_enabled and not mat.disable_receive_shadows, "Theia must respond to scene lighting and shadows")
+		assert(not mat.emission_enabled and not mat.disable_receive_shadows, "Agnes must respond to scene lighting and shadows")
 	var origin := actor.global_position
 	var max_body_drift := 0.0
 	var max_camera_step := 0.0

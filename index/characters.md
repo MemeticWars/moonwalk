@@ -1,5 +1,25 @@
 # Postacie i wspinanie
 
+Przy przejściu ze ściany na nachylony dach Agnes przez dodatkowe 0,55 s kontynuuje animację wspinania, pochylając model zgodnie ze styczną rzeczywiście wykrytej powierzchni dachu, do maksymalnie 28°. Gdy sonda utraci dach, model pozostaje pionowo; pochylenie dotyczy wyłącznie modelu, wygasa przed pełzaniem, a kapsuła kolizji oraz sondy bezpieczeństwa nadal kontrolują ruch.
+
+`Stand_Up2` może rozpocząć się tylko raz po danym wejściu na dach: krótkie utracenie podparcia podczas animacji nie wraca już do pełzania ani nie uruchamia jej ponownie. Trasa pełzania nie przekracza już pionowej krawędzi na wysokości ściany: najpierw podnosi kapsułę nad parapet, dopiero potem przesuwa ją po potwierdzonej powierzchni; trzymanie Q po wstaniu automatycznie rozpoczyna kolejne wejście na ścianę nad balkonem, jeśli taka ściana jest w zasięgu.
+
+Przejście nad parapetem ma jawne fazy: kapsuła najpierw unosi się 0,38 m nad krawędź, przechodzi nad nią, a następnie osiada na potwierdzonym dachu. Ten kontrolowany, krótki ruch w dół jest oznaczony jako osadzanie po krawędzi, a nie upadek.
+
+## Dokładna kolizja budynków (2026-09-12)
+
+Zwykły ruch humanoida zachowuje dodatkowe 0,5 m od pionowych ścian poza promieniem kapsuły, żeby animowane kończyny nie wnikały w fasadę. Osłona działa na rzeczywistych powierzchniach budynków; Q wyłącza ją na czas podejścia i wspinania, a kontakt z wystającym cokołem pozwala zacząć wspinanie tylko przy potwierdzonej ścianie powyżej. Dachy i podłoże nie są traktowane jak ściany.
+
+Rozpoznanie drzwi wymaga nadproża, ościeży po obu stronach oraz wnęki/otworu na trzech wysokościach i w trzech punktach szerokości postaci. Pełnej szerokości cofnięta fasada pod wystającą kondygnacją nie jest drzwiami; sprawdzenie ściany toleruje pojedyncze szczeliny i skosy, wymagając co najmniej sześciu z dziewięciu trafień, w tym dwóch na wysokości barków. Test `wall_clearance_test.gd` obejmuje margines, przejście Q do podejścia, cofniętą fasadę, wnękę drzwiową i pełną ścianę obok drzwi; test rzeczywistych modeli dodatkowo sprawdza dostępność startów wspinania z marginesu na sześciu wariantach budynków.
+
+Pełzanie kończy dojście do punktu podparcia z tolerancją 5 mm zamiast 6 cm, a wybór punktu sprawdza docelową wysokość postaci z odsunięciem 4 cm od dachu. Wcześniejsze zatrzymanie tuż przed bezpiecznym punktem potrafiło powodować powroty ze wstawania do pełzania na twin-houses.
+
+Budynki obsługujące wspinanie korzystają teraz z jednej siatki kolizji `ClimbSurface` na warstwach 1 i 2: ruch postaci oraz sondy wspinaczki trafiają w te same trójkąty fasady i dachu. Zastępuje to wcześniejsze pudełka i pełnej wysokości przybliżenia obrysu opisane w historii poniżej, które wypełniały wnęki dachów i blokowały dostęp do niektórych ścian; uwzględnione są skala, obrót i odbicie modelu. Kształty są współdzielone między instancjami modelu, aktywowane tylko blisko gracza i zwalniane z pamięci podręcznej po opuszczeniu miasta.
+
+Przy podciąganiu `human_controller.gd` najpierw unosi postać nad krawędź, a następnie przesuwa ją na dach, aby ruch po skosie nie prowadził tułowia przez fasadę twin building. Zachowane są wykrywanie drzwi, pełzanie po łuku i kontrola podparcia przy wstawaniu.
+
+Weryfikacja: `godot/tests/building_collision_test.gd` porównuje kolizje ruchu i sond na rzeczywistych modelach twin-houses, block-of-flats, central-building, central-house oraz zwykłym i lustrzanym L; `crawl_roof_test.gd` sprawdza bezpieczne pełzanie i wstawanie. Pełny test gry `--climb-test --camera-test` potwierdził wejście Agnes na dach twin-houses (5,73 m w górę) i stabilne stanie po animacji.
+
 Agnes jest jedyną postacią tworzoną przez `moonwalk.gd`. Theia nie jest dostępna jako postać grywalna ani przez parametr uruchomienia; pliki historycznych modeli można zachować wyłącznie poza przepływem gry.
 
 `human_controller.gd` zawiera wspólne stany ruchu, wspinania, pełzania i bezpiecznego wstawania. `humanoid_motion_library.gd` retargetuje dziesięć donorów animacji Agnes na model ze `Skeleton3D`, przy automatycznym rozpoznawaniu typowych nazw kości albo przez `humanoid_bone_map`.

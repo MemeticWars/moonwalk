@@ -8,6 +8,19 @@ const TILE := 64.0
 const NEAR_RADIUS := 2
 const FAR_RADIUS := 4
 const MAX_GRADE := 0.06
+## Sanity bound for how steep real lunar terrain can plausibly get, not a
+## limit this highway ever tries to match. Apollo-era soil-mechanics samples
+## put the lunar regolith's angle of repose at roughly 30-50 deg depending on
+## grain shape/depth; LOLA slope statistics show the vast majority of the
+## surface under ~35 deg, with steeper faces confined to fresh, localised
+## crater walls/scarps rather than the kind of extended terrain a road runs
+## across. 35 deg (~70% grade) is used here as that "typical stable maximum".
+## It matters because it is well above MAX_GRADE (6%, an engineering choice
+## for a driveable road, same order as a real highway) -- so real ground can
+## legitimately climb faster than this road is allowed to follow. When it
+## does, the deck must go elevated on piers rather than either hugging the
+## slope (breaking MAX_GRADE) or getting left buried under it.
+const MAX_NATURAL_SLOPE_DEG := 35.0
 const PLANNING_STEP := 8.0
 const PLANNING_MARGIN := 64.0
 const SLOPE_COST := 22.0
@@ -17,6 +30,10 @@ const DETOUR_SLOPE := 0.06
 const DETOUR_HOLLOW := 3.0
 const SAMPLE_STEP := 4.0
 const SECTOR_REACH := 1400.0
+## Beyond the collision-streamed sector, retain a sparse visible continuation
+## of every strategic road. It avoids creating thousands of physics panels.
+const FAR_LOD_REACH := 20000.0
+const FAR_LOD_STEP := 96.0
 ## Local sector-frame anchor for the colony's town square, not a geographic
 ## coordinate — every sector uses this same local origin.
 const SECTOR_ORIGIN := Vector2(-9, -14)
@@ -39,6 +56,7 @@ var interchange_links: Array[Dictionary] = []
 var ground_exits: Array[Dictionary] = []
 var full_segment_count := 0
 var far_segment_count := 0
+var far_lod: Node3D
 
 func _ready() -> void:
 	name = "RoadStreamer"
@@ -48,6 +66,7 @@ func _ready() -> void:
 	_bake_sector_routes()
 	preload("res://scripts/highway_interchange.gd").build(self)
 	lamp_descriptors_by_tile = Lamps.layout(descriptors_by_tile, lane_width + 0.4, lamp_min_station_by_route)
+	_build_far_lod()
 	center = terrain.center
 	call_deferred("_sync_tiles")
 
@@ -56,10 +75,22 @@ func _process(_delta: float) -> void:
 		center = terrain.center
 		_sync_tiles()
 
+## Local sector-frame point every baked route/far-LOD measures its stations
+## from. Every colony but Tycho places its town square right at SECTOR_ORIGIN,
+## so that generic anchor still applies. Tycho's dome no longer sits there --
+## it was relocated onto the crater's central peak -- so its own highway
+## anchor tracks TychoSite.CENTER instead, via the same fixed dome-to-anchor
+## offset the original site happened to coincide with.
+func town_square_origin() -> Vector2:
+	if active_colony == "Tycho Station":
+		return TychoSite.CENTER + TychoSite.HIGHWAY_ANCHOR_OFFSET
+	return SECTOR_ORIGIN
+
 func _bake_sector_routes() -> void:
 	# Only one colony's sector is resident at a time. The local corridors
 	# follow actual initial great-circle bearings; distant colonies are never
 	# miniaturized here.
+	var origin := town_square_origin()
 	for route: Dictionary in world_routes:
 		if route.from != active_colony and route.to != active_colony:
 			continue
@@ -70,28 +101,110 @@ func _bake_sector_routes() -> void:
 		var lon := deg_to_rad(float(destination.longitude) - float(source.longitude))
 		var bearing := atan2(sin(lon) * cos(lat2), cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(lon))
 		var direction := Vector2(sin(bearing), -cos(bearing))
-		# Tycho's spur begins at the dome gate and stays a short, near-level
-		# approach that arrives on the city pad; other sectors keep the long reach.
+		# Tycho's main carriageway starts outside the dome. The airlock reaches it
+		# through a separate access road, so a motorway deck never crosses the gate.
+		# Cut back to 350 (was 400) after the 2026-09-13 site move north/west:
+		# real DEM coverage along this bearing now runs out barely past the gate
+		# (see tycho_site.gd's own note), so extending the paved near-field deck
+		# further just puts more of it on procedural fallback ground for little
+		# benefit. Kept well past the ground_pin's own 120 m blend radius and the
+		# lamp system's 85 m minimum station (both measured from `start`), or the
+		# deck goes fully flat / loses its lamps entirely. A temporary trim, not
+		# a re-solved fit; revisit together with the gate/apron grading if the
+		# site moves again.
 		var tycho := active_colony == "Tycho Station"
-		var start := SECTOR_ORIGIN + direction * (64.0 if tycho else 90.0)
-		var goal := SECTOR_ORIGIN + direction * (400.0 if tycho else SECTOR_REACH)
-		# Pin the approach to the dome gate itself (the route's first point), not
-		# the dome centre -- the route never passes within ~100 m of the centre,
-		# so a centre pin never engages and the spur floats on the global lift.
-		# No guardrail for the first 70 m: the dome-gate portal itself sits over
-		# roughly the first 40 m (tycho_dome.gd::_add_gate_portal), and the
-		# cosmoport off-ramp (tycho_cosmoport.gd) branches off at 52 m -- a rail
-		# anywhere in that span either blocks the gate passage or fences the ramp
-		# off. Keep in sync with that script's `junction := o + hwy * 116.0`
-		# (116 - the gate's own station 64 = 52, comfortably inside [0, 70]).
+		var start := origin + direction * (150.0 if tycho else 90.0)
+		var goal := origin + direction * (350.0 if tycho else SECTOR_REACH)
+		# Leave a broad rail-free opening around the shared city/cosmoport junction.
+		# It sits 25 m beyond the Tycho motorway start; the dome gate itself is no
+		# longer part of the carriageway.
 		var pin: Dictionary = {"center": start, "radius": 120.0, "level": terrain.city_level,
-			"rails_gap": 35.0, "rails_gap_half": 35.0} if tycho else {}
+			"rails_gap": 25.0, "rails_gap_half": 55.0} if tycho else {}
 		if tycho:
-			# The gate GLB (tycho_dome.gd::_add_gate_portal) reaches from just inside
-			# the shell out to roughly 40 m past the route start -- keep the first
-			# highway lamp posts (stations 10/30) past that, or they land inside it.
-			lamp_min_station_by_route[route.id] = 45.0
+			lamp_min_station_by_route[route.id] = 85.0
 		_bake_route(route.id, _follow_safe_ground([start, goal]), 0.15, pin)
+
+func _route_endpoint(route_id: String) -> Vector3:
+	var result := Vector3.INF
+	var last_index := -1
+	for segments: Array in descriptors_by_tile.values():
+		for segment: Dictionary in segments:
+			if segment.route == route_id and int(segment.index) > last_index:
+				last_index = int(segment.index)
+				result = segment.b
+	return result
+
+func _build_far_lod() -> void:
+	if far_lod != null:
+		far_lod.queue_free()
+	far_lod = Node3D.new()
+	far_lod.name = "FarHighwayLOD"
+	add_child(far_lod)
+	var origin := town_square_origin()
+	for route: Dictionary in world_routes:
+		if route.from != active_colony and route.to != active_colony:
+			continue
+		var source: Dictionary = route.a if route.from == active_colony else route.b
+		var destination: Dictionary = route.b if route.from == active_colony else route.a
+		var lat1 := deg_to_rad(float(source.latitude))
+		var lat2 := deg_to_rad(float(destination.latitude))
+		var lon := deg_to_rad(float(destination.longitude) - float(source.longitude))
+		var bearing := atan2(sin(lon) * cos(lat2), cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(lon))
+		var direction := Vector2(sin(bearing), -cos(bearing))
+		var first := _route_endpoint(route.id)
+		if first == Vector3.INF:
+			continue
+		var reach := minf(float(route.distance_km) * 1000.0, FAR_LOD_REACH)
+		var start_distance := Vector2(first.x - origin.x, first.z - origin.y).dot(direction)
+		if reach <= start_distance + 1.0:
+			continue
+		var segments: Array = []
+		var count := ceili((reach - start_distance) / FAR_LOD_STEP)
+		var right2d := Vector2(-direction.y, direction.x)
+		var half_width := lane_width + 0.4
+		# Required height at each station, sampled across the FULL deck width
+		# (not just the centreline) -- real lunar cross-slope near a crater
+		# rim/peak can tilt the ground enough, over just this width, that a
+		# centreline-only sample leaves the uphill lane buried in it.
+		var points2d: Array[Vector2] = [Vector2(first.x, first.z)]
+		var heights := PackedFloat32Array([first.y])
+		for i in range(1, count + 1):
+			var station := minf(reach, start_distance + FAR_LOD_STEP * float(i))
+			var point_2d := origin + direction * station
+			var required := -INF
+			for across in range(-3, 4):
+				var p := point_2d + right2d * half_width * float(across) / 3.0
+				required = maxf(required, terrain.height_at(p.x, p.y) + 0.15)
+			points2d.append(point_2d)
+			heights.append(required)
+		# Two-sided max-grade envelope, same technique _bake_route uses: only
+		# ever raises a station's height, so a slope steeper than MAX_GRADE
+		# (well within what real lunar terrain can do -- see
+		# MAX_NATURAL_SLOPE_DEG above) lifts the deck onto piers instead of
+		# either breaking the grade limit or ending up under the regolith.
+		for i in range(1, heights.size()):
+			heights[i] = maxf(heights[i], heights[i - 1] - MAX_GRADE * points2d[i].distance_to(points2d[i - 1]))
+		for i in range(heights.size() - 2, -1, -1):
+			heights[i] = maxf(heights[i], heights[i + 1] - MAX_GRADE * points2d[i].distance_to(points2d[i + 1]))
+		var previous := Vector3(points2d[0].x, heights[0], points2d[0].y)
+		for i in range(1, heights.size()):
+			var current := Vector3(points2d[i].x, heights[i], points2d[i].y)
+			var tangent := (current - previous).normalized()
+			var right := tangent.cross(Vector3.UP).normalized()
+			segments.append({"index": i - 1, "a": previous, "b": current, "ra": right, "rb": right, "na": Vector3.UP, "nb": Vector3.UP, "position": (previous + current) * 0.5, "route": route.id, "paint": false, "rails": true, "half_width": half_width, "clearance": current.y - terrain.height_at(current.x, current.z)})
+			previous = current
+		if not segments.is_empty():
+			var visual := MeshInstance3D.new()
+			visual.name = "FarDeck_" + route.id
+			visual.mesh = HighwayMesh.deck(segments, half_width)
+			visual.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			far_lod.add_child(visual)
+			# Rails + periodic support piers wherever clearance runs high --
+			# same HighwayMesh.fittings() the near-field collision tiles use,
+			# just without the vertical near-side posts (near=false).
+			for s: Dictionary in segments:
+				HighwayMesh.fittings(far_lod, s, half_width - 0.1, false)
+	_batch_fittings(far_lod)
 
 func _follow_safe_ground(waypoints: Array[Vector2]) -> Array[Vector2]:
 	# The authored waypoints describe the strategic connection. Each leg is
@@ -351,9 +464,11 @@ func _build_road_tile(key: Vector2i, lod: int) -> Node3D:
 
 func _batch_fittings(root: Node3D) -> void:
 	# One draw call per fitting material and tile, not one per rail or post.
+	# Also reused for FarHighwayLOD, whose own per-route deck meshes are named
+	# "FarDeck_<route id>" instead of the single "ContinuousConcreteDeck".
 	var groups := {}
 	for child in root.get_children():
-		if not child is MeshInstance3D or child.name == "ContinuousConcreteDeck":
+		if not child is MeshInstance3D or child.name == "ContinuousConcreteDeck" or child.name.begins_with("FarDeck_"):
 			continue
 		var material: Material = child.mesh.surface_get_material(0)
 		if not groups.has(material):

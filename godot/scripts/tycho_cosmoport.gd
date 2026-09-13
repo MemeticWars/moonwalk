@@ -6,6 +6,11 @@ extends Node3D
 
 const BASE := "res://assets/colonies/tycho/modules/cosmoport.glb"
 const HOPPER := "res://assets/colonies/tycho/modules/delivery-hopper.glb"
+## Landing apron radius, in the same cosmoport-local frame as highway_origin --
+## exposed so tycho_city.gd can grade a matching terrain pad for it (see
+## _build_paths()'s gate/apron add_city_pad calls) before this node samples
+## the ground here.
+const APRON_RADIUS := 52.0
 
 var terrain: Node3D
 var gate_dir := Vector2(0.0, -1.0)       # unit XZ from the dome centre toward the gate
@@ -26,19 +31,31 @@ func _ready() -> void:
 
 	var apron_top := 0.28
 
-	# --- Short forecourt at the dome gate (foot traffic spills onto the highway here).
+	# --- Forecourt at the dome gate. It is an access road, not motorway pavement.
 	_slab(o + hwy * 64.0 + gate * 5.0, gate, 22.0, 32.0, 0.12, concrete, true)
 
-	# --- Landing apron, set well back from the carriageway.
-	var junction := o + hwy * 116.0
+	# --- Landing apron, set well back from the carriageway. The motorway begins
+	# at station 150; both local roads meet its rail-free opening at station 175.
+	var junction := o + hwy * 175.0
 	var apron_c := o + hwy * 150.0 + hwy_side * 95.0
-	var apron_r := 52.0
+	var apron_r := APRON_RADIUS
 	var ground := _min_ground(apron_c, apron_r)
 	_octagon(apron_c, apron_r, apron_top, ground - 0.2, concrete)
 	_body_box(apron_c + Vector3.UP * (apron_top * 0.5), Vector3(apron_r * 1.9, maxf(0.6, apron_top - ground + 0.4), apron_r * 1.9))
 
-	# --- Curved off-ramp: leaves the carriageway heading `hwy`, sweeps out across
-	#     `hwy_side`, drops from road level onto the apron, arriving parallel.
+	# --- City access arrives on one side of the motorway opening. It bends clear
+	# of the airlock instead of lying beneath the main deck.
+	var gate_exit := gate * 105.0
+	var access_end := junction - hwy_side * 6.0
+	var access_handle := gate_exit.distance_to(access_end) * 0.38
+	var access: Array[Vector3] = []
+	for k in 21:
+		var t := float(k) / 20.0
+		access.append(gate_exit.bezier_interpolate(gate_exit + gate * access_handle, access_end - hwy * access_handle, access_end, t))
+	_ribbon(access, 11.0, concrete)
+
+	# --- Curved off-ramp leaves the opposite side of the same opening and sweeps
+	#     out toward the apron. No motorway rail crosses either local road.
 	var ramp_in := junction + hwy_side * 6.0
 	var ramp_out := apron_c - hwy_side * (apron_r - 8.0)
 	var y_hi: float = terrain.height_at(position.x + junction.x, position.z + junction.z) - position.y + 0.4

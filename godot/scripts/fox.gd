@@ -9,14 +9,15 @@ extends Node3D
 ## model visibly jump by up to ~1 m within a few frames.)
 
 const FOX_SCENE := preload("res://assets/colonies/tycho/modules/fox.glb")
+const Site := preload("res://scripts/tycho_site.gd")
 const TARGET_HEIGHT_M := 0.30
 const WALK_SPEED := 0.5  # m/s -- a small animal's ambling pace
 const ARRIVE_DIST := 0.2
 # World-space XZ box for the west tree garden (Site.CENTER + the _layout()
-# park-tree grid: x in [-26,-11], z(local) in [-76,-12] -> world z = local+25),
+# park-tree grid: x in [-26,-11], z(local) in [-76,-12] -> world z = Site.CENTER.y+local),
 # inset so wander targets don't land inside a trunk or spill onto the road.
-const PARK_MIN := Vector2(-25.0, -49.5)
-const PARK_MAX := Vector2(-12.0, 11.5)
+const PARK_MIN := Site.CENTER + Vector2(-25.0, -74.5)
+const PARK_MAX := Site.CENTER + Vector2(-12.0, -13.5)
 const TREE_CLEARANCE := 1.6
 
 var terrain: Node3D
@@ -37,7 +38,7 @@ func _ready() -> void:
 	_rng.randomize()
 	for x in [-26.0, -21.0, -16.0, -11.0]:
 		for z in [-76.0, -68.0, -60.0, -52.0, -44.0, -36.0, -28.0, -20.0, -12.0]:
-			_tree_centers.append(Vector2(x, 25.0 + z))
+			_tree_centers.append(Vector2(Site.CENTER.x + x, Site.CENTER.y + z))
 	_body = FOX_SCENE.instantiate()
 	add_child(_body)
 	_scale_to_height()

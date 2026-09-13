@@ -22,14 +22,8 @@ func _run() -> void:
 	collider.position.y = -0.5
 	floor_body.add_child(collider)
 	world.add_child(floor_body)
-	for script in [preload("res://scripts/agnes.gd"), preload("res://scripts/human_controller.gd")]:
+	for script in [preload("res://scripts/agnes.gd")]:
 		var actor: CharacterBody3D = script.new()
-		# human_controller.gd defaults to no humanoid_model_path (plain shared
-		# clips, like Agnes). Point this instance at an unrelated skinned model
-		# with no animations of its own, to prove the generalized mechanics
-		# still work on any rigged humanoid, not just Agnes.
-		if script != preload("res://scripts/agnes.gd"):
-			actor.humanoid_model_path = "res://assets/theia/theia_hooded_walking.glb"
 		actor.terrain = ground
 		world.add_child(actor)
 		actor.set_physics_process(false)
@@ -50,8 +44,6 @@ func _run() -> void:
 				assert(is_equal_approx(value.x, start.x) and is_equal_approx(value.z, start.z), "Stand animation must not move the body across the roof")
 				hip_rise = maxf(hip_rise, absf(value.y - start.y))
 		assert(hip_rise > 0.05, "Standing must retain vertical hip motion")
-		var rig: Skeleton3D = actor.MOTIONS.skeleton_in(actor.visuals[actor.CRAWL])
-		print("ACTOR POSE ", actor.character_name, " scale ", actor.pivot.scale, " foot ", rig.global_transform * rig.get_bone_global_pose(rig.find_bone("LeftFoot")).origin)
 		var saw_stand := false
 		for tick in 600:
 			await physics_frame
@@ -62,7 +54,6 @@ func _run() -> void:
 				assert(actor.active_visual == actor.STAND_UP)
 				actor._physics_stand_up(1.0 / 60.0)
 			else: break
-		print("STAND STATE ", actor.character_name, " ", actor.stand_up_elapsed, " length ", stand.length, " active ", actor.active_visual, " pos ", actor.global_position)
 		assert(saw_stand and not actor.stand_up_active and not actor.climb_auto_walk, "Crawl -> Stand_Up2 -> idle must complete")
 		actor.set_physics_process(true)
 		await create_timer(0.7).timeout

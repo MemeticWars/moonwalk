@@ -1,4 +1,4 @@
-extends "res://scripts/theia.gd"
+extends "res://scripts/human_base.gd"
 
 signal pause_changed(value: bool)
 signal camera_changed(index: int)
@@ -19,6 +19,10 @@ var free_pitch := 0.0
 var free_position := Vector3.ZERO
 var mouse_sensitivity := 0.006
 var paused := false
+## Set/cleared by moonwalk.gd's bench interaction (Agnes-suit <-> seated
+## Agnes). Movement/camera updates and most keys freeze while true; the
+## camera itself is framed once, externally, by whoever set this.
+var sitting := false
 var turn_direction := 0
 var turn_elapsed := 0.0
 var turn_duration := 0.0
@@ -26,6 +30,9 @@ var turn_repeat_elapsed := 0.0
 var active_visual := 0
 var classic_controls := true
 var persist_settings := true
+## Automated Godot runs must never take over the desktop pointer.  Headless
+## runs have no window, while --agent-run also protects visual captures.
+var automation_run := false
 var autopilot := false
 var autopilot_direction := Vector3.FORWARD
 var autopilot_running := false
@@ -83,6 +90,11 @@ func set_sensitivity(value: float) -> void:
 
 func _ready() -> void:
 	super._ready()
+	var command_args := OS.get_cmdline_user_args()
+	automation_run = "--agent-run" in command_args
+	for command_arg in command_args:
+		if command_arg.begins_with("--capture") or command_arg.ends_with("-test") or command_arg == "--dem-probe":
+			automation_run = true
 	if not InputMap.has_action("run_forward"): InputMap.add_action("run_forward")
 	var key := InputEventKey.new()
 	key.physical_keycode = KEY_Q
@@ -93,7 +105,7 @@ func _ready() -> void:
 		binding.physical_keycode = pair[1]
 		if not InputMap.action_has_event(pair[0], binding): InputMap.action_add_event(pair[0], binding)
 	pivot.rotation.y = visual_yaw
-	persist_settings = not ("--smoke-test" in OS.get_cmdline_user_args() or "--capture" in OS.get_cmdline_user_args() or "--capture-sky" in OS.get_cmdline_user_args() or "--camera-test" in OS.get_cmdline_user_args())
+	persist_settings = not automation_run
 	var config := ConfigFile.new()
 	var initial_camera := 1
 	if persist_settings and config.load("user://controls.cfg") == OK:
@@ -101,13 +113,16 @@ func _ready() -> void:
 		mouse_sensitivity = clampf(config.get_value("controls", "sensitivity", 0.006), 0.001, 0.012)
 		initial_camera = config.get_value("controls", "camera", 1 if classic_controls else 3)
 	set_camera_mode(initial_camera)
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	set_mouse_captured(true)
+
+func set_mouse_captured(captured: bool) -> void:
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if captured and not automation_run else Input.MOUSE_MODE_VISIBLE
 
 func set_paused(value: bool) -> void:
 	paused = value
 	for player in players:
 		player.speed_scale = 0
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if paused else Input.MOUSE_MODE_CAPTURED
+	set_mouse_captured(not paused)
 	pause_changed.emit(paused)
 
 func cycle_camera() -> void:
@@ -154,7 +169,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		set_paused(not paused)
 		get_viewport().set_input_as_handled()
 		return
-	if paused: return
+	if paused or sitting: return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		if mode == 3:
 			visual_yaw = fposmod(visual_yaw - event.relative.x * mouse_sensitivity, TAU)
@@ -205,7 +220,7 @@ func _start_turn(direction: int) -> void:
 	players[active_visual].seek(0, true)
 
 func _physics_process(delta: float) -> void:
-	if not enabled or paused: return
+	if not enabled or paused or sitting: return
 	if classic_controls:
 		_physics_classic(delta)
 		return
@@ -355,7 +370,7 @@ func _update_camera() -> void:
 		camera.look_at(target)
 
 func _process(delta: float) -> void:
-	# theia.gd (the base class) has no _process right now, so this is a no-op
+	# The neutral human base has no _process right now, so this is a no-op.
 	# up the chain -- kept anyway, since a derived _process silently replaces
 	# the base one instead of extending it in GDScript, and that already
 	# caused one base _process to sit dead for a whole debugging session.

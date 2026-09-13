@@ -4,6 +4,7 @@ const RADIUS_KM := 1737.4
 const LIMIT_KM := 700.0
 ## Explicit requested regional network, exempt from the proximity threshold.
 const FARSIDE_LOCATIONS := ["Chang'e Relay", "Blooming Flower", "Daedalus Port"]
+const ROUTE_SAMPLE_KM := 10.0
 
 static func is_farside_connection(a: Dictionary, b: Dictionary) -> bool:
 	return a.name in FARSIDE_LOCATIONS and b.name in FARSIDE_LOCATIONS and a.name != b.name
@@ -24,6 +25,19 @@ static func distance_km(a: Dictionary, b: Dictionary) -> float:
 	# Micrometre precision makes exactly 700 km stable at the strict boundary.
 	return snappedf(distance, 0.000000001)
 
+static func route_points(a: Dictionary, b: Dictionary, spacing_km: float = ROUTE_SAMPLE_KM) -> Array[Dictionary]:
+	# Canonical centreline for the whole road, not merely the first local spur.
+	# Each active terrain sector can request a short portion of this path.
+	var distance := distance_km(a, b)
+	var count := maxi(1, ceili(distance / spacing_km))
+	var start := unit(a)
+	var end := unit(b)
+	var points: Array[Dictionary] = []
+	for i in range(count + 1):
+		var direction := start.slerp(end, float(i) / float(count)).normalized()
+		points.append({"latitude": rad_to_deg(asin(direction.y)), "longitude": rad_to_deg(atan2(direction.x, direction.z)), "station_km": distance * float(i) / float(count)})
+	return points
+
 static func build(locations: Array) -> Array[Dictionary]:
 	var routes: Array[Dictionary] = []
 	for i in locations.size():
@@ -35,5 +49,6 @@ static func build(locations: Array) -> Array[Dictionary]:
 			if distance > 0.0 and (distance < LIMIT_KM or farside):
 				routes.append({"id": "%s--%s" % [a.name, b.name], "from": a.name,
 					"to": b.name, "distance_km": distance, "a": a, "b": b,
-					"connection_rule": "farside_region" if farside else "proximity"})
+					"connection_rule": "farside_region" if farside else "proximity",
+					"points": route_points(a, b)})
 	return routes

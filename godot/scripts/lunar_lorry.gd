@@ -56,6 +56,13 @@ var wheel_radius := 1.3
 var rig_ready := false
 var stuck_for := 0.0
 var unstick_for := 0.0
+var controlled := false
+var drive_throttle := 0.0
+var drive_steer := 0.0
+var drive_brake := true
+const LUNAR_GRAVITY := 1.62
+const MAX_DRIVE_SPEED := 8.0
+const REGOLITH_GRIP := 0.8
 
 var route := PackedVector3Array([
 	Vector3(11.0, 0.0, -22.0),
@@ -81,7 +88,10 @@ func _ready() -> void:
 	mass = 2600.0
 	collision_layer = 1
 	collision_mask = 1
-	angular_damp = 2.4               # settle body roll/pitch quickly
+	linear_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
+	linear_damp = 0.0 # No aerodynamic drag in vacuum.
+	angular_damp_mode = RigidBody3D.DAMP_MODE_REPLACE
+	angular_damp = 0.05
 	center_of_mass_mode = RigidBody3D.CENTER_OF_MASS_MODE_CUSTOM
 
 	track_material = StandardMaterial3D.new()
@@ -93,6 +103,14 @@ func _ready() -> void:
 	get_parent().add_child(track_root)
 	track_root.name = "WheelTracks"
 
+	_build_visuals()
+	_build_headlights()
+	set_light_mode(light_mode)
+	global_position = _route_point(0)
+	freeze = true
+	call_deferred("_finish_rig")
+
+func _build_visuals() -> void:
 	model = LORRY_SCENE.instantiate()
 	add_child(model)
 	# Donor front (its -X) turned to face the body's forward (-Z).
@@ -105,11 +123,8 @@ func _ready() -> void:
 	pod.rotation = Vector3(0.0, -PI * 0.5, 0.0)
 	pod.scale = Vector3.ONE
 
-	_build_headlights()
-	set_light_mode(light_mode)
-	global_position = _route_point(0)
-	freeze = true
-	call_deferred("_finish_rig")
+func _wheel_mesh_names() -> Array:
+	return WHEEL_NAMES
 
 func _dress_donor(node: Node) -> void:
 	if node is MeshInstance3D:
@@ -166,9 +181,9 @@ func _fit_pod() -> void:
 func _build_suspension() -> void:
 	var donor_wheels := {}
 	for m in _all_meshes(model):
-		if m.name.to_lower() in WHEEL_NAMES:
+		if m.name.to_lower() in _wheel_mesh_names():
 			donor_wheels[m.name.to_lower()] = m
-	for key in WHEEL_NAMES:
+	for key in _wheel_mesh_names():
 		var tyre: MeshInstance3D = donor_wheels[key]
 		var centre := tyre.global_transform * tyre.mesh.get_aabb().get_center()
 		var box := _combined_aabb([tyre])
@@ -183,11 +198,11 @@ func _build_suspension() -> void:
 		vw.use_as_steering = axle_local.z < 0.0     # front axle steers
 		vw.wheel_radius = wheel_radius
 		vw.wheel_rest_length = SUSPENSION_REST
-		vw.wheel_friction_slip = WHEEL_GRIP
+		vw.wheel_friction_slip = REGOLITH_GRIP
 		vw.wheel_roll_influence = WHEEL_ROLL_INFLUENCE
 		vw.suspension_travel = SUSPENSION_TRAVEL
 		vw.suspension_stiffness = SUSPENSION_STIFFNESS
-		vw.suspension_max_force = mass * 12.0
+		vw.suspension_max_force = mass * LUNAR_GRAVITY * 3.0 / _wheel_mesh_names().size()
 		vw.damping_compression = DAMP_COMPRESS
 		vw.damping_relaxation = DAMP_RELAX
 		vwheels.append(vw)
@@ -258,6 +273,9 @@ func light_mode_label() -> String:
 func _physics_process(delta: float) -> void:
 	if not rig_ready:
 		return
+	if controlled:
+		_drive(delta)
+		return
 	var goal := _route_point(1)
 	var to_goal := goal - global_position
 	to_goal.y = 0.0
@@ -320,6 +338,8 @@ func _stamp_tracks() -> void:
 		return
 	last_stamp = global_position
 	for vw in vwheels:
+		if not vw.is_in_contact():
+			continue
 		var p := vw.global_position
 		var local_p := track_root.to_local(Vector3(p.x, terrain.height_at(p.x, p.z) + 0.05, p.z))
 		var basis := Basis(Vector3.UP, rotation.y)
@@ -327,6 +347,33 @@ func _stamp_tracks() -> void:
 		track_cursor = (track_cursor + 1) % MAX_TRACK_MARKS
 		track_count += 1
 	track_multimesh.visible_instance_count = mini(track_count, MAX_TRACK_MARKS)
+
+func _drive(delta: float) -> void:
+	var contacts := 0
+	for wheel in vwheels:
+		if wheel.is_in_contact():
+			contacts += 1
+	var speed := linear_velocity.dot(-global_basis.z)
+	var speed_limit := MAX_DRIVE_SPEED if drive_throttle >= 0 else 2.5
+	# Limit lateral acceleration to the traction available at lunar weight.
+	var limit := minf(STEER_LIMIT, atan(REGOLITH_GRIP * LUNAR_GRAVITY * 3.5 / maxf(speed * speed, 0.1)))
+	steering = move_toward(steering, drive_steer * limit, delta * 0.6)
+	var traction := mass * LUNAR_GRAVITY * REGOLITH_GRIP * float(contacts) / maxf(vwheels.size(), 1)
+	var reverse_requested := drive_throttle * speed < -0.2
+	engine_force = 0.0
+	brake = 0.0
+	if contacts > 0:
+		if drive_brake or reverse_requested:
+			brake = traction / maxf(vwheels.size(), 1)
+		elif absf(speed) < speed_limit:
+			# VehicleBody's positive engine direction is +Z; this model faces -Z.
+			engine_force = -drive_throttle * minf(ENGINE_PULL, traction) / maxf(vwheels.size(), 1)
+		# Rolling resistance acts only on the ground, never as airborne drag.
+		var horizontal := Vector3(linear_velocity.x, 0, linear_velocity.z)
+		if horizontal.length() > 0.01:
+			apply_central_force(-horizontal.normalized() * minf(mass * LUNAR_GRAVITY * 0.025, horizontal.length() * mass / delta))
+	if last_stamp == Vector3.INF or global_position.distance_to(last_stamp) >= 1.2:
+		_stamp_tracks()
 
 func _build_track_renderer() -> void:
 	var strip := PlaneMesh.new()

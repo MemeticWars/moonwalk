@@ -21,7 +21,7 @@ func run() -> void:
 	while city.loaded.size() != city.descriptors.size() and Time.get_ticks_msec() < deadline:
 		await process_frame
 	check(city.loaded.size() == city.descriptors.size(), "Every nearby city module must finish streaming")
-	check(city.descriptors.size() == 69, "C-shaped city: buildings, two road benches and 36 trees")
+	check(city.descriptors.size() == 65, "C-shaped city: buildings, two road benches and 36 trees")
 	var bench_count := 0
 	var greenhouse_count := 0
 	var greenhouse_film_count := 0
@@ -118,8 +118,12 @@ func run() -> void:
 	for x in range(-80, 81, 10):
 		for z in range(-80, 81, 10):
 			if Vector2(x, z).length() < 95.0:
-				check(absf(terrain.height_at(x, z + 25) - terrain.city_level) < 0.001, "City interior must be level")
-	check(absf(terrain.raw_height(160, 25) - terrain.natural_height(160, 25)) < 0.001, "Outside blend: original DTM must be intact")
+				check(absf(terrain.height_at(x + city.Site.CENTER.x, z + city.Site.CENTER.y) - terrain.city_level) < 0.001, "City interior must be level")
+	# 500 m west of D1 (whichever site D1 currently sits on) stays clear of
+	# every registered pad (D1, D2, m1, m2, m3): the east annex's mini-dome m2
+	# grades real terrain out to x=170+72.5=242.5 from D1, well short of 500.
+	var outside := Vector2(city.Site.CENTER.x - 500.0, city.Site.CENTER.y)
+	check(absf(terrain.raw_height(outside.x, outside.y) - terrain.natural_height(outside.x, outside.y)) < 0.001, "Outside blend: original DTM must be intact")
 	var modules: Dictionary = city.dimensions
 	check(absf(float(modules["block-of-flats"].size_m[0]) - 18.35778465270996) < 0.01 and
 		absf(float(modules["block-of-flats"].size_m[1]) - 36.0) < 0.01 and
@@ -162,19 +166,20 @@ func run() -> void:
 		"Street lamp diffusers must be narrow, extended by 10 cm at each end, and offset 0.9 m outward")
 	await physics_frame
 	await physics_frame
-	var ray := PhysicsRayQueryParameters3D.create(Vector3(0, terrain.city_level + 10, 0), Vector3(0, terrain.city_level - 5, 0))
+	var centre3 := Vector3(city.Site.CENTER.x, 0.0, city.Site.CENTER.y)
+	var ray := PhysicsRayQueryParameters3D.create(centre3 + Vector3(0, terrain.city_level + 10, 0), centre3 + Vector3(0, terrain.city_level - 5, 0))
 	var hit := root.world_3d.direct_space_state.intersect_ray(ray)
 	check(not hit.is_empty() and absf(hit.get("position", Vector3.ZERO).y - terrain.city_level) < 0.01,
 		"Walking collision must match the flattened ground")
-	ray = PhysicsRayQueryParameters3D.create(Vector3(-56, terrain.city_level + 45, 63), Vector3(-56, terrain.city_level - 1, 63))
+	ray = PhysicsRayQueryParameters3D.create(centre3 + Vector3(-56, terrain.city_level + 45, 38), centre3 + Vector3(-56, terrain.city_level - 1, 38))
 	hit = root.world_3d.direct_space_state.intersect_ray(ray)
 	check(not hit.is_empty() and absf(hit.get("position", Vector3.ZERO).y - terrain.city_level - 36.0) < 0.01,
 		"Apartment blocks must have solid exterior collision")
-	terrain.update_focus(Vector3(2000, 0, 2000))
+	terrain.update_focus(centre3 + Vector3(2150, 0, 3180))
 	await process_frame
 	await process_frame
 	check(city.loaded.is_empty() and city.scenes.is_empty(), "Distant city nodes and resources must unload")
-	terrain.update_focus(Vector3.ZERO)
+	terrain.update_focus(centre3)
 	deadline = Time.get_ticks_msec() + 60000
 	while city.loaded.size() != city.descriptors.size() and Time.get_ticks_msec() < deadline:
 		await process_frame

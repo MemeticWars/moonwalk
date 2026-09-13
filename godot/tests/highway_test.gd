@@ -32,6 +32,9 @@ func run() -> void:
 		check(route.distance_km < 700.0 or Network.is_farside_connection(route.a, route.b), "Only the three farside pairs bypass the threshold")
 		check(not seen.has(route.id), "No duplicate connection")
 		seen[route.id] = true
+		check(route.points.size() >= 2, "Every route has a full centreline")
+		check(absf(float(route.points[0].latitude) - float(route.a.latitude)) < 0.001, "Centreline starts at the source colony")
+		check(absf(float(route.points[-1].longitude) - float(route.b.longitude)) < 0.001, "Centreline ends at the destination colony")
 	var farside_pairs := ["Chang'e Relay--Blooming Flower", "Chang'e Relay--Daedalus Port", "Blooming Flower--Daedalus Port"]
 	for pair in farside_pairs:
 		check(seen.has(pair), "Missing farside connection: " + pair)

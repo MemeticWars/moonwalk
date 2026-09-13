@@ -41,7 +41,7 @@ func _run() -> void:
 	actor._physics_climb(1.0 / 60.0)
 	assert(not actor.climb_active, "Door opening also blocks continued climbing")
 	# Remove all target animations and rename the rig before borrowing motions.
-	var target := (load("res://assets/theia/theia_hooded_walking.glb") as PackedScene).instantiate() as Node3D
+	var target := (load("res://assets/agnes/fitted/agnes_suit_Animation_Idle_5_withSkin.glb") as PackedScene).instantiate() as Node3D
 	var skeleton := Motions.skeleton_in(target)
 	var mapping := {}
 	for bone in skeleton.get_bone_count():

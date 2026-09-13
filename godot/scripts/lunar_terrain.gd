@@ -39,7 +39,12 @@ var road_grading_by_tile: Dictionary = {}
 var road_grading_count := 0
 var road_cuts_by_tile: Dictionary = {}
 const SURVEY_BLEND_M := 256.0
+## Additional flattened pads beyond the one TychoSite/city_level describe --
+## e.g. the east annex's own dome and mini-domes, each graded to its own real
+## median elevation instead of reusing the (different) main-site level.
+var extra_pads: Array[Dictionary] = []
 var local_sources: Dictionary = {}
+var pad_refresh_pending := false
 
 func _ready() -> void:
 	var colony_name: String = colony.get("name", "Silesia")
@@ -91,7 +96,12 @@ func _ready() -> void:
 		levels.sort()
 		city_level = levels[levels.size() / 2]
 	_prepare_materials()
-	update_focus(Vector3.ZERO)
+	# Every colony but Tycho keeps its town square near local (0,0) by
+	# convention, so the world origin is a reasonable default focus before the
+	# player actor exists. Tycho's dome now sits far from that origin (on the
+	# crater's central peak), so it needs its own real starting focus or the
+	# very first streamed tiles centre on empty ground far from the city.
+	update_focus(Vector3(TychoSite.CENTER.x, 0.0, TychoSite.CENTER.y) if city_enabled else Vector3.ZERO)
 	# Spawn collision is ready before the player is added.
 	for i in 9:
 		_build_next()
@@ -312,10 +322,50 @@ func add_road_cut(a: Vector3, b: Vector3, width: float) -> void:
 				road_cuts_by_tile[key] = []
 			road_cuts_by_tile[key].append(cut)
 
+## Registers a new flat pad centred on a real, surveyed median elevation (same
+## method as TychoSite/city_level above, just not pinned to that one site), so
+## a second dome elsewhere on the same DTM sector grades to its own real
+## ground instead of the main site's -- these can differ by several metres
+## even a few hundred metres away on a nominally flat crater floor. Returns
+## the computed level so the caller can also use it for its own buildings.
+## `level_override`, when not null, skips the median-elevation survey below
+## and forces this pad flat at that exact height instead -- used to level a
+## whole cluster of pads to one shared plane (e.g. the east annex to D1's
+## own `city_level`) rather than each pad's own independently-surveyed
+## local median.
+func add_city_pad(center: Vector2, radius: float, blend: float, sample_radius: float = 80.0, level_override = null) -> float:
+	var level: float
+	if level_override != null:
+		level = level_override
+	else:
+		var levels: Array[float] = []
+		var step := 20
+		var r := int(sample_radius)
+		for z in range(-r, r + 1, step):
+			for x in range(-r, r + 1, step):
+				if Vector2(x, z).length() <= sample_radius:
+					levels.append(natural_height(center.x + x, center.y + z))
+		levels.sort()
+		level = levels[levels.size() / 2]
+	extra_pads.append({"center": center, "radius": radius, "blend": blend, "level": level})
+	# Pads can be registered after the initial spawn tiles already exist.
+	# Batch all pads from this frame before rebuilding their terrain/collision.
+	if not pad_refresh_pending and is_inside_tree():
+		pad_refresh_pending = true
+		_refresh_city_pads.call_deferred()
+	return level
+
+func _refresh_city_pads() -> void:
+	pad_refresh_pending = false
+	refresh_road_grading()
+
 func raw_height(x: float, z: float) -> float:
 	var result := natural_height(x, z)
 	if city_enabled:
 		result = lerpf(result, city_level, TychoSite.weight(x, z))
+	for pad: Dictionary in extra_pads:
+		var pad_weight: float = 1.0 - smoothstep(pad.radius, pad.radius + pad.blend, Vector2(x, z).distance_to(pad.center))
+		result = lerpf(result, pad.level, pad_weight)
 	var point := Vector2(x, z)
 	var key := Vector2i(floori(x / TILE), floori(z / TILE))
 	for cut: Dictionary in road_cuts_by_tile.get(key, []):
@@ -373,7 +423,10 @@ func _build_ground(key: Vector2i, lod: int) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Tile_%d_%d_LOD%d" % [key.x, key.y, lod]
 	root.set_meta("lod", lod)
-	var cells := 32 if lod == 0 or road_grading_by_tile.has(key) else 8
+	# All local tile borders share the surveyed 2 m grid. Coarse 8 m edges
+	# interpolated across fine relief, leaving cracks and floating triangles.
+	# The outer ring still omits physics/rocks; the horizon handles coarse LOD.
+	var cells := 32
 	var step := TILE / cells
 	var vertices := PackedVector3Array()
 	var normals := PackedVector3Array()

@@ -2,6 +2,8 @@ extends Node3D
 ## Full-detail source modules share resources; Godot generates mesh LODs.
 ## Only buildings in the active terrain tile neighbourhood are instantiated.
 const Site := preload("res://scripts/tycho_site.gd")
+const Cosmoport := preload("res://scripts/tycho_cosmoport.gd")
+const Dome := preload("res://scripts/tycho_dome.gd")
 const ASSETS := "res://assets/colonies/tycho/modules/"
 const BEECH_BARK_AND_LEAVES := preload("res://shaders/foliage_silver.gdshader")
 const GRASS_BLADE := preload("res://shaders/grass_blade.gdshader")
@@ -18,11 +20,108 @@ var scenes: Dictionary = {}
 var requested: Dictionary = {}
 var dimensions: Dictionary = {}
 var ground_details: Node3D
+## East annex site centres/sizes -- read by tycho_east_annex.gd (the extra
+## dome shells + inter-dome tunnels + local solar array) and by _build_paths()
+## below (D1's own dome needs matching cuts toward each connected site).
+## Layout: m1 due east of D1, m2 due south, m3 due WEST (moved from north,
+## its north slot now held by the solar array -- see tycho_east_annex.gd's
+## SOLAR_SITE) -- each joined to D1 by its own tunnel. D2 sits further south,
+## beyond m2, joined only to m2. West sits on a real, noticeably sloped
+## shoulder of the peak (~55 m relief across the pad, more than D1's own
+## ~50 m): the pad grading cuts into that slope rather than around it, so m3
+## reads as dug into the hillside, with only part of its shell clear of it --
+## intended, not a site-selection miss.
+## Graph: m1-D1, m2-D1, m3-D1, m2-D2.
+const M1_CENTER := Site.CENTER + Vector2(170.0, 0.0)
+const M2_CENTER := Site.CENTER + Vector2(0.0, 170.0)
+const M3_CENTER := Site.CENTER + Vector2(-170.0, 0.0)
+const D2_CENTER := Site.CENTER + Vector2(0.0, 340.0)
+const D2_RADIUS := 100.0
+const D2_HEIGHT := 90.0
+const MINI_RADIUS := 50.0
+const MINI_HEIGHT := 45.0
+const MINI_BLEND := 22.5
+## Centre-to-centre spacing for every connected pair above was chosen as
+## radius_a + TUNNEL_GAP + radius_b, so the tunnel exactly bridges the two
+## shell surfaces with no gap and no overlap.
+const TUNNEL_GAP := 20.0
+## Airlock doorway size: matches the tunnel's own square passage
+## (tycho_east_annex.gd's CROSS_SECTION_SIDE, ~6.86 m) plus a small margin,
+## so the dome-wall opening clears the widened tunnel model on every side.
+const TUNNEL_HALF_WIDTH := 3.6
+const TUNNEL_CUT_HEIGHT := 7.2
+## Park pond -> stream -> m2 fish pond (tycho_water_feature.gd). Kept here,
+## alongside the other site constants, so _build_grass() below can carve
+## matching keep-outs out of the lawn's MultiMesh grass.
+const POND1_CENTER := Site.CENTER + Vector2(-18.0, -4.0)
+const POND1_RADII := Vector2(4.5, 3.2)
+## Now that m2/D2 sit south instead of west, the stream is routed south too:
+## out of the park, past the central-house's west edge, around the west
+## block-of-flats tower arm (which hugs the dome wall from roughly due-east
+## to due-west of straight south, leaving the direct south corridor -- where
+## the m2 tunnel opening actually is -- clear), then straight down the
+## middle to the D1/tunnel/m2 wall openings.
+const STREAM_WAYPOINTS: Array[Vector2] = [
+	Site.CENTER + Vector2(-18.0, 0.0),
+	Site.CENTER + Vector2(-25.0, 5.0),
+	Site.CENTER + Vector2(-32.0, 20.0),
+	Site.CENTER + Vector2(-45.0, 50.0),
+	Site.CENTER + Vector2(-45.0, 68.0),
+	Site.CENTER + Vector2(-20.0, 85.0),
+	Site.CENTER + Vector2(-5.0, 95.0),
+	Site.CENTER + Vector2(0.0, 99.0),
+	Site.CENTER + Vector2(0.0, 110.0),
+	Site.CENTER + Vector2(0.0, 121.0),
+	Site.CENTER + Vector2(0.0, 150.0),
+]
+const STREAM_WIDTH := 2.4
+const POND2_RADII := Vector2(32.0, 18.0)
+
+## m1/m2/m3 sit due east/south/west of D1 -- exactly on the dome's own
+## triangulation grid (multiples of TAU/Dome.SECTORS), same as the highway
+## gate's angle. tycho_dome.gd removes a face by its CENTRE, which for the two
+## faces straddling a grid line sits half a sector-width off that line; a cut
+## arc narrower than that (as a physical-width-only asin() can easily be, once
+## a big enough dome_radius shrinks the angle) removes neither straddling
+## face, leaving their shared edge -- a beam running straight down the exact
+## middle of the doorway. Floor the arc at a safe margin past that half-width
+## so every cut clears its two straddling faces regardless of physical width.
+static func tunnel_cut(from: Vector2, to: Vector2, radius: float) -> Dictionary:
+	var min_clearance_arc := 0.65 * TAU / Dome.SECTORS
+	return {"angle": atan2(to.y - from.y, to.x - from.x),
+		"arc": maxf(asin(clampf(TUNNEL_HALF_WIDTH / radius, 0.0, 1.0)), min_clearance_arc), "cut_height": TUNNEL_CUT_HEIGHT}
+
+static func tunnel_cuts_toward(from: Vector2, targets: Array, radius: float) -> Array[Dictionary]:
+	var cuts: Array[Dictionary] = []
+	for target: Vector2 in targets:
+		cuts.append(tunnel_cut(from, target, radius))
+	return cuts
 
 func _ready() -> void:
 	name = "TychoCity"
 	dimensions = JSON.parse_string(FileAccess.get_file_as_string(ASSETS + "modules.json"))
 	_layout()
+	# Independent of the site descriptors above: it manages its own load/unload
+	# distance against terrain.center, since it sits far outside TychoSite's
+	# radius and must not be torn down when the dome/city itself unloads.
+	var power_plant := preload("res://scripts/tycho_power_plant.gd").new()
+	power_plant.terrain = terrain
+	add_child(power_plant)
+	# The east annex is an optional streamed extension while its separate
+	# builder is present. Keep the base city runnable if that work is absent.
+	var annex_script: Script = load("res://scripts/tycho_east_annex.gd") as Script
+	if annex_script != null:
+		var annex := annex_script.new() as Node3D
+		annex.terrain = terrain
+		add_child(annex)
+	# Also optional/independent: the park pond -> stream -> m2 fish pond,
+	# gated (in addition to its own distance check) on the east annex having
+	# already graded m2's pad.
+	var water_script: Script = load("res://scripts/tycho_water_feature.gd") as Script
+	if water_script != null:
+		var water := water_script.new() as Node3D
+		water.terrain = terrain
+		add_child(water)
 
 func _place(kind: String, x: float, z: float, yaw: float = 0.0, y: float = 0.0, mirror: bool = false) -> void:
 	var point := Site.CENTER + Vector2(x, z)
@@ -53,9 +152,8 @@ func _layout() -> void:
 	_place("greenhouse", 23, -55, 0)
 	_place("greenhouse", 23, -47, 0)
 	_place("greenhouse", 23, -39, 0)
-	for side in [-1.0, 1.0]:
-		_place("fotovoltaic-panels", side * 18, 84)
-		_place("fotovoltaic-panels", side * 48, 72)
+	# Solar arrays moved off the dome floor entirely: see TychoPowerPlant, added
+	# below as a permanent sibling of this node's own descriptor-driven city.
 	for z in [-28.0, -16.0, -4.0]:
 		_place("tank", -77, z, PI / 2.0)
 	# Benches line both verges of the main north-south road, clear of crossings.
@@ -117,6 +215,7 @@ func _process(_delta: float) -> void:
 			loaded.erase(i)
 	if wanted.is_empty():
 		scenes.clear()
+		facade_shapes.clear()
 		if is_instance_valid(ground_details):
 			ground_details.queue_free()
 			ground_details = null
@@ -158,6 +257,9 @@ func _process(_delta: float) -> void:
 			_build_module(i, wanted[i])
 			built = true
 
+const CLIMBABLE_KINDS := ["central-house", "central-building", "block-of-flats", "twin-houses", "l-shape-building"]
+var facade_shapes: Dictionary = {}
+
 func _build_module(index: int, collision_enabled: bool) -> void:
 	var descriptor := descriptors[index]
 	var kind: String = descriptor.kind
@@ -181,7 +283,7 @@ func _build_module(index: int, collision_enabled: bool) -> void:
 		visual.scale.x = 0.5
 	if descriptor.has("span"):
 		visual.scale.x = descriptor.span / float(dimensions[kind].size_m[0])
-	if kind in ["central-house", "central-building", "block-of-flats", "twin-houses", "l-shape-building"]:
+	if kind in CLIMBABLE_KINDS:
 		_add_climb_surface(root, visual, collision_enabled)
 	for mesh: MeshInstance3D in visual.find_children("*", "MeshInstance3D", true, false):
 		if kind == "park-pine":
@@ -246,14 +348,11 @@ func _build_module(index: int, collision_enabled: bool) -> void:
 	body.name = "Body"
 	root.add_child(body)
 	var size: Array = dimensions[kind].size_m
-	if kind == "l-shape-building" or kind == "block-of-flats" or kind == "central-building" or kind == "central-house":
-		# A single bounding box massively overshoots these footprints -- an L-shape's
-		# box also fills its own missing quadrant, and the octagonal/round towers
-		# lose their whole corners/circle-to-square gap -- to the point of blocking
-		# Q's climb interaction (1.7 m reach) everywhere but a building's own flat
-		# faces. Measured footprint directly (top-down raycast grid against each
-		# GLB's real triangles) and fit tight prisms/a cylinder to it instead.
-		_add_precise_footprint_collider(body, descriptor, kind, size, collision_enabled)
+	if kind in CLIMBABLE_KINDS:
+		# ClimbSurface now supplies movement AND probe collision. A full-height
+		# footprint prism fills roof recesses and can block the capsule in midair.
+		# Keep the empty Body node for the common streaming lifecycle.
+		body.collision_layer = 0
 	else:
 		var collider := CollisionShape3D.new()
 		collider.name = "Shape"
@@ -353,19 +452,19 @@ func _add_cylinder_collider(body: StaticBody3D, shape_name: String, radius: floa
 	body.add_child(collider)
 
 func _add_climb_surface(root: Node3D, visual: Node3D, enabled: bool) -> void:
-	# The broad box below is retained for ordinary character movement. This body
-	# lives on layer 2: climb rays query the actual render triangles, and Agnes
-	# enables this layer for capsule support after reaching the roof. During
-	# climbing, surface probes follow the facade independently of the broad box.
+	# One surface for walking (layer 1) and climbing probes (layer 2), including
+	# curved roofs, door openings and mirrored/scaled module instances.
 	var body := StaticBody3D.new()
 	body.name = "ClimbSurface"
-	body.collision_layer = 2
+	body.collision_layer = 3
 	body.collision_mask = 0
 	root.add_child(body)
 	for mesh: MeshInstance3D in visual.find_children("*", "MeshInstance3D", true, false):
 		if mesh.mesh == null or mesh.mesh.get_surface_count() == 0: continue
 		var collider := CollisionShape3D.new()
-		collider.shape = mesh.mesh.create_trimesh_shape()
+		if not facade_shapes.has(mesh.mesh):
+			facade_shapes[mesh.mesh] = mesh.mesh.create_trimesh_shape()
+		collider.shape = facade_shapes[mesh.mesh]
 		collider.disabled = not enabled
 		# The collider is a child of the module root, so retain every nested mesh
 		# transform (including rotations and authored source scale).
@@ -526,27 +625,58 @@ func _build_paths() -> void:
 	ground_details = Node3D.new()
 	ground_details.name = "CityPaths"
 	add_child(ground_details)
-	# Highway gate: due south (-Z), exactly on the dome's triangulation grid so the
+	# Highway gate: due north (-Z), exactly on the dome's triangulation grid so the
 	# angular cut lands on whole sectors (no stray partial-triangle beams left
 	# standing in the opening), and its passage axis lands on x=0 -- the same
 	# central axis as the main north-south road's Rect2(-5, -97, 10, 114) below.
 	# Same opening serves the cosmoport road.
 	const GATE_DIR := Vector2(0.0, -1.0)
-	# The actual baked highway heading (road_streamer's `direction`, bearing 12.94deg)
-	# and its centreline origin (road_streamer.SECTOR_ORIGIN), for the cosmoport
-	# off-ramp to branch off the real carriageway rather than a guessed line.
+	# The actual baked highway heading (road_streamer's `direction`, bearing 12.94deg,
+	# fixed by the real colonies.json bearing to InPost Central, independent of
+	# where the dome itself sits) and its centreline origin -- Site.CENTER plus
+	# the same fixed dome-to-anchor offset road_streamer.town_square_origin()
+	# uses for Tycho -- for the cosmoport off-ramp to branch off the real
+	# carriageway rather than a guessed line.
 	const HIGHWAY_DIR := Vector2(0.2239, -0.9746)
-	const HIGHWAY_ORIGIN := Vector2(-9, -14)
 	var dome := preload("res://scripts/tycho_dome.gd").new()
 	dome.position = Vector3(Site.CENTER.x, terrain.city_level, Site.CENTER.y)
 	dome.gate_angle = atan2(GATE_DIR.y, GATE_DIR.x)
 	dome.gate_arc = 0.1
+	# Airlock tunnels toward the east annex's three mini-domes (m1/m2/m3): see
+	# tycho_east_annex.gd, which cuts the matching opening on their side.
+	dome.extra_cuts = tunnel_cuts_toward(Site.CENTER, [M1_CENTER, M2_CENTER, M3_CENTER], D2_RADIUS)
 	ground_details.add_child(dome)
-	var cosmoport := preload("res://scripts/tycho_cosmoport.gd").new()
+	# Real terrain climbs steeply just past D1's own flattened pad on the gate
+	# side -- expected, this whole site sits on the central peak's shoulder --
+	# so without their own graded pads the gate/forecourt/junction and the
+	# cosmoport apron would be half-buried in that slope, same as an
+	# ungraded east-annex mini-dome would be (see tycho_east_annex.gd's own
+	# add_city_pad calls). Register both BEFORE building the cosmoport node,
+	# which samples this same ground in its own _ready().
+	var hwy_dir := HIGHWAY_DIR.normalized()
+	var hwy_side := Vector2(-hwy_dir.y, hwy_dir.x)
+	var highway_anchor: Vector2 = Site.HIGHWAY_ANCHOR_OFFSET
+	var gate_cluster: Array[Vector2] = [
+		highway_anchor + GATE_DIR * 100.0,              # dome gate
+		highway_anchor + hwy_dir * 64.0 + GATE_DIR * 5.0,  # forecourt
+		highway_anchor + hwy_dir * 150.0,               # motorway start / ground_pin
+		highway_anchor + hwy_dir * 175.0,               # rail-free junction
+	]
+	var gate_centroid := Vector2.ZERO
+	for p: Vector2 in gate_cluster:
+		gate_centroid += p
+	gate_centroid /= gate_cluster.size()
+	var gate_radius := 0.0
+	for p: Vector2 in gate_cluster:
+		gate_radius = maxf(gate_radius, p.distance_to(gate_centroid))
+	terrain.add_city_pad(Site.CENTER + gate_centroid, gate_radius + 15.0, 40.0, 80.0, terrain.city_level)
+	var apron_center := highway_anchor + hwy_dir * 150.0 + hwy_side * 95.0
+	terrain.add_city_pad(Site.CENTER + apron_center, Cosmoport.APRON_RADIUS + 18.0, 35.0, 80.0, terrain.city_level)
+	var cosmoport := Cosmoport.new()
 	cosmoport.terrain = terrain
 	cosmoport.gate_dir = GATE_DIR
 	cosmoport.highway_dir = HIGHWAY_DIR
-	cosmoport.highway_origin = HIGHWAY_ORIGIN - Site.CENTER
+	cosmoport.highway_origin = Site.HIGHWAY_ANCHOR_OFFSET
 	cosmoport.position = Vector3(Site.CENTER.x, terrain.city_level, Site.CENTER.y)
 	ground_details.add_child(cosmoport)
 	var lamps := preload("res://scripts/tycho_city_lamps.gd").new()
@@ -595,8 +725,8 @@ func _add_city_lawn() -> void:
 		var a0 := TAU * float(i) / float(segments)
 		var a1 := TAU * float(i + 1) / float(segments)
 		st.add_vertex(Vector3.ZERO)
-		st.add_vertex(Vector3(radius * cos(a1), 0.0, radius * sin(a1)))
 		st.add_vertex(Vector3(radius * cos(a0), 0.0, radius * sin(a0)))
+		st.add_vertex(Vector3(radius * cos(a1), 0.0, radius * sin(a1)))
 	st.generate_normals()
 	var disc := MeshInstance3D.new()
 	disc.name = "CityLawn"
@@ -645,6 +775,17 @@ func _build_grass(roads: Array) -> void:
 		box_h.append(Vector2(sx * 0.5 + 0.6, sz * 0.5 + 0.6))
 		box_cos.append(cos(-float(d.yaw)))
 		box_sin.append(sin(-float(d.yaw)))
+	# The park pond and the stream feeding it (tycho_water_feature.gd) also
+	# need to keep grass blades from growing straight through the water.
+	box_c.append(POND1_CENTER - Site.CENTER)
+	box_h.append(POND1_RADII + Vector2(0.6, 0.6))
+	box_cos.append(1.0)
+	box_sin.append(0.0)
+	var stream_segments: Array[Vector2] = []
+	for i in range(STREAM_WAYPOINTS.size() - 1):
+		stream_segments.append(STREAM_WAYPOINTS[i] - Site.CENTER)
+		stream_segments.append(STREAM_WAYPOINTS[i + 1] - Site.CENTER)
+	const STREAM_CLEARANCE := STREAM_WIDTH * 0.5 + 0.6
 
 	var grown_roads: Array[Rect2] = []
 	for r: Rect2 in roads:
@@ -685,6 +826,13 @@ func _build_grass(roads: Array) -> void:
 				var rx := dx * box_cos[b] - dz * box_sin[b]
 				var rz := dx * box_sin[b] + dz * box_cos[b]
 				if absf(rx) <= box_h[b].x and absf(rz) <= box_h[b].y:
+					blocked = true
+					break
+			if blocked:
+				continue
+			for si in range(0, stream_segments.size(), 2):
+				var closest: Vector2 = Geometry2D.get_closest_point_to_segment(here, stream_segments[si], stream_segments[si + 1])
+				if here.distance_to(closest) < STREAM_CLEARANCE:
 					blocked = true
 					break
 			if blocked:

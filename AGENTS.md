@@ -8,7 +8,7 @@ Gra opowiada o kurierze InPost na Księżycu po wojnie odcinającej kolonie od Z
 
 ## Współpraca agentów
 
-Nad tym repozytorium jednocześnie pracują agenci Codex oraz Claude. Zmiany należy ograniczać do własnego zadania, sprawdzać stan Git przed edycją i nie nadpisywać bieżącej pracy drugiego agenta. Szczegóły zasad współpracy są w [index/collaboration.md](index/collaboration.md).
+Nad tym repozytorium jednocześnie pracują agenci Codex oraz Claude. Zmiany należy ograniczać do własnego zadania, sprawdzać stan Git przed edycją i nie nadpisywać bieżącej pracy drugiego agenta; Godota do automatycznej pracy uruchamiaj przez `--headless`, a gdy potrzebny jest render okienkowy, dodaj `--agent-run`, aby nie przechwytywać kursora użytkownika. Szczegóły zasad współpracy są w [index/collaboration.md](index/collaboration.md).
 
 ## Autostrady między lokacjami
 
@@ -21,3 +21,17 @@ Agnes jest jedyną grywalną postacią, a mechanika wspinania odrzuca otwory drz
 ## Dane, teren i uruchamianie
 
 Gra działa w Godot 4.6.1 i streamuje lokalny sektor księżycowy wokół aktywnej postaci. Duże assety i dane wysokościowe są poza Gitem, dlatego klon kodu wymaga ich osobnego dostarczenia. Szczegóły konfiguracji, źródeł danych i uruchamiania są w [index/project.md](index/project.md).
+
+## Pojazdy i konwój
+
+Agnes może prowadzić Lorry po wejściu klawiszem F, a za łazikiem jadą dwa ośmiokołowe drony transportowe. Pojazdy korzystają z fizyki księżycowej, ograniczonej przyczepności oraz wspólnego sterowania napędem, a drony śledzą trasę poprzednika i zachowują odstęp. Szczegóły sterowania, implementacji i testów są w [index/vehicles.md](index/vehicles.md).
+
+## Ciągłość terenu
+
+Geometria terenu i wspólne krawędzie kafli muszą być deterministyczne dla tych samych danych oraz poziomów LOD, niezależnie od kolejności wczytywania. Wyrównania pod zabudowę wymagają aktualizacji już utworzonych siatek i kolizji, a horyzont nie może nakładać większych kafli na lokalny grunt. Szczegóły implementacji i testów są w [index/terrain.md](index/terrain.md).
+
+## Narzędzia assetów Tycho
+
+Skrypty przygotowujące pojedyncze assety Tycho leżą w `tools/` i noszą nazwę `prepare_tycho_*.py`, obok pozostałych skryptów tej rodziny. Ich opis oraz komendy przebudowania kopii gry należą do `godot/assets/colonies/tycho/README.md`; nie dopisuj przy okazji nieobjętych zmianą starszych skryptów do jego listy przebudowania.
+
+Szczegółowy wzorzec, w tym `prepare_tycho_habitat_tunnel.py` i `prepare_tycho_fish.py`, jest w [index/project.md](index/project.md#narzędzia-przygotowania-assetów-tycho).

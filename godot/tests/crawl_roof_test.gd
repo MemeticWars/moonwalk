@@ -69,6 +69,9 @@ func _run() -> void:
 	assert(not actor._roof_can_stand(Vector3(20, 0, 0)), "Narrow flat strip is insufficient")
 	assert(not actor._roof_can_stand(Vector3(30, 0, 0)), "Horizontal dome apex alone is insufficient")
 	assert(not actor._roof_can_stand(Vector3(40, 0, 0)), "Missing roof is not support")
+	actor.climb_forward = Vector3.RIGHT
+	assert(actor._roof_tangent_pitch(Vector3(-0.57, 0.82, 0)) < 0.0, "Roof rising toward Agnes gives a forward lean")
+	assert(actor._roof_tangent_pitch(Vector3.UP) == 0.0, "Flat roof gives no artificial lean")
 	actor.global_position = Vector3(0, -1.71, -1)
 	actor.climb_forward = Vector3.BACK
 	assert(not is_nan(actor._nearby_ledge_top()), "Flat roof still allows the ledge finish")
@@ -102,6 +105,15 @@ func _run() -> void:
 		if actor.stand_up_active: actor._physics_stand_up(1.0 / 60.0)
 	assert(not actor.stand_up_active and actor.global_position == stand_position, "Standing clip completes without body travel")
 	assert(actor._roof_can_stand(actor.global_position), "Crawl ends only on a supported footprint")
+	actor.global_position = Vector3(40, 0, 0)
+	actor.climb_auto_walk = false
+	actor.stand_up_active = true
+	actor.climb_stand_started = true
+	actor.stand_up_elapsed = 0.0
+	for tick in 90:
+		if actor.stand_up_active: actor._physics_stand_up(1.0 / 60.0)
+	assert(not actor.stand_up_active and not actor.climb_auto_walk, "Failed Stand_Up2 never returns to crawl")
+	actor.global_position = stand_position
 	var landing_y := actor.global_position.y
 	for tick in 120:
 		await physics_frame

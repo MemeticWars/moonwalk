@@ -17,6 +17,10 @@ const CRAWL := 8
 const STAND_UP := 9
 var stand_up_active := false
 var stand_up_elapsed := 0.0
+## A landing may complete Stand_Up2 once. It must never bounce between this
+## animation and crawl because a live foot probe briefly loses an edge.
+var climb_stand_started := false
+var climb_requested := false
 var stand_support_time := 0.0
 const STAND_SUPPORT_DELAY := 0.2
 ## Stand_Up2 itself swings the feet through the crouch-to-standing motion, so
@@ -89,11 +93,21 @@ const CLIMB_WALL_MISS_GRACE := 0.35
 ## Curved roofs are traversed using local surface samples until the entire
 ## standing footprint is supported on a nearly level patch.
 var climb_auto_walk := false
+const CLIMB_ROOF_BLEND_DURATION := 0.55
+const CLIMB_ROOF_MAX_LEAN := deg_to_rad(28.0)
+var climb_roof_blend_left := 0.0
+var climb_roof_pose_start := 0.0
+var climb_roof_normal := Vector3.UP
+var climb_clearing_lip := false
+var climb_lip_settling := false
 var climb_auto_walk_target := Vector3.ZERO
 var climb_finish_target := Vector3.ZERO
 const CLIMB_AUTO_WALK_SPEED := 0.8
+const CLIMB_LIP_CLEARANCE := 0.38
 const ROOF_STAND_NORMAL := 0.94 # about 20 degrees
 const ROOF_SUPPORT_RADIUS := 0.3
+const WALL_WALK_MARGIN := 0.5
+const CLIMB_CONTACT_REACH := 0.65
 
 
 
@@ -122,21 +136,18 @@ func _ready() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and not event.echo and event.physical_keycode == KEY_Q:
+		climb_requested = event.pressed
 	if enabled and not paused and event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_Q:
 		var consumed := false
 		if stand_up_active or climb_finishing:
 			consumed = true
 		elif climb_active:
-			climb_active = false
-			_sync_visual(false, false)
+			# Holding Q means continue upwards; it no longer cancels the climb.
 			consumed = true
 		elif climb_approaching:
-			climb_approaching = false
-			_sync_visual(false, false)
 			consumed = true
 		elif climb_auto_walk:
-			climb_auto_walk = false
-			_sync_visual(false, false)
 			consumed = true
 		else:
 			consumed = _try_start_climb()
@@ -181,6 +192,9 @@ func _start_turn(direction: int) -> void:
 
 func _physics_process(delta: float) -> void:
 	if not enabled or paused: return
+	if not climb_auto_walk:
+		climb_roof_blend_left = 0.0
+		pivot.rotation.x = 0.0
 	if stand_up_active:
 		_physics_stand_up(delta)
 		return
@@ -197,6 +211,7 @@ func _physics_process(delta: float) -> void:
 		_physics_climb_finish(delta)
 		return
 	super._physics_process(delta)
+	_keep_wall_clearance()
 	if not jump_active: return
 	if not is_on_floor(): jump_left_floor = true
 	if jump_left_floor and is_on_floor():
@@ -212,6 +227,27 @@ func _physics_process(delta: float) -> void:
 		jump_phase = lerpf(0.08, 0.42, clampf(1.0 - velocity.y / 2.6, 0, 1)) if velocity.y >= 0 else lerpf(0.42, 0.78, clampf(-velocity.y / 2.6, 0, 1))
 	_show_jump()
 
+func _keep_wall_clearance() -> void:
+	# Extra space for animated limbs; only vertical building surfaces count.
+	# Q approach and all climbing states bypass this ordinary movement guard.
+	if climb_approaching or climb_active or climb_finishing or climb_auto_walk or stand_up_active: return
+	var clearance := collision_radius_m + WALL_WALK_MARGIN
+	for step in 16:
+		var direction := Vector3(sin(step * TAU / 16.0), 0, cos(step * TAU / 16.0))
+		for fraction: float in [0.25, 0.55, 0.85]:
+			var hit := _facade_hit(direction, reference_height_m * fraction, clearance * 1.1)
+			if hit.is_empty() or absf((hit.normal as Vector3).y) > 0.45: continue
+			var normal: Vector3 = hit.normal
+			normal.y = 0
+			normal = normal.normalized()
+			var gap := (global_position - (hit.position as Vector3)).dot(normal)
+			if gap < 0 or gap >= clearance: continue
+			var correction := normal * (clearance - gap)
+			# Respect physical obstacles on the opposite side of a narrow passage.
+			move_and_collide(correction)
+			var inward := velocity.dot(normal)
+			if inward < 0: velocity -= normal * inward
+
 func _show_jump() -> void:
 	active_visual = 5
 	for i in visuals.size():
@@ -226,7 +262,7 @@ func _wall_ahead_from(direction: Vector3, at_height: float, reach: float) -> boo
 	var from := global_position + Vector3.UP * at_height
 	var query := PhysicsRayQueryParameters3D.create(from, from + direction * reach)
 	query.exclude = [get_rid()]
-	query.collision_mask = 2 # detailed facade triangles; layer 1 is the coarse movement box
+	query.collision_mask = 2 # climbable facade triangles, also used for movement on layer 1
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
 	if hit.is_empty(): return false
 	# Floors and slopes are not walls. A climb target must have a near-horizontal
@@ -284,16 +320,27 @@ func _nearby_ledge_top() -> float:
 	var top_y: float = (hit.position as Vector3).y
 	return top_y if top_y >= head_y - 0.08 and top_y <= head_y + 0.38 else NAN
 
+func _at_climb_contact() -> bool:
+	# A projecting plinth can stop the capsule before the torso reaches the
+	# recessed facade. Contact at the feet counts only with a wall above it.
+	if not _wall_ahead(1.15): return false
+	for height: float in [0.3, 0.82, 1.15]:
+		if _wall_ahead(height, CLIMB_CONTACT_REACH): return true
+	return false
+
 func _try_start_climb() -> bool:
 	if jump_active or climb_active or climb_finishing or climb_approaching or climb_auto_walk or stand_up_active or mode == 4: return false
 	climb_forward = _nearest_climb_surface()
 	if climb_forward.is_zero_approx(): return false
+	climb_stand_started = false
+	climb_clearing_lip = false
+	climb_lip_settling = false
 	set_collision_mask_value(2, false)
 	visual_yaw = atan2(climb_forward.x, climb_forward.z)
 	pivot.rotation.y = visual_yaw
 	turn_direction = 0
 	climb_wall_miss_time = 0.0
-	if _wall_ahead(1.15):
+	if _at_climb_contact():
 		climb_active = true
 		velocity = Vector3.ZERO
 		_show_climb(6, 0.0)
@@ -315,7 +362,7 @@ func _physics_climb_approach(delta: float) -> void:
 	climb_forward = direction
 	_move_classic_body(delta, direction, false)
 	_update_camera()
-	if _wall_ahead(1.15):
+	if _at_climb_contact():
 		climb_approaching = false
 		climb_active = true
 		climb_wall_miss_time = 0.0
@@ -362,7 +409,13 @@ func _physics_climb(delta: float) -> void:
 				_sync_visual(false, false)
 			else:
 				climb_auto_walk = true
-				climb_auto_walk_target = roof.position + Vector3.UP * 0.04
+				# Raise the capsule above the parapet before crossing its vertical
+				# collision. The following phase settles onto the sampled roof.
+				climb_auto_walk_target = roof.position + Vector3.UP * CLIMB_LIP_CLEARANCE
+				climb_clearing_lip = true
+				climb_roof_blend_left = CLIMB_ROOF_BLEND_DURATION if (roof.normal as Vector3).y < ROOF_STAND_NORMAL else 0.0
+				climb_roof_pose_start = players[CLIMB].current_animation_position
+				climb_roof_normal = roof.normal as Vector3
 				_show_climb(8, 0.0)
 			return
 	velocity = climb_forward * 0.08 + Vector3.UP * 1.05
@@ -378,6 +431,9 @@ func _physics_climb_finish(delta: float) -> void:
 	var wanted_y := lerpf(climb_finish_start_y, climb_finish_top_y, phase)
 	var remaining := maxf(climb_finish_duration - climb_finish_elapsed + delta, delta)
 	var horizontal := (climb_finish_target - global_position) / remaining
+	# Feet must clear the lip before the capsule advances across the facade.
+	if global_position.y < climb_finish_top_y - 0.08:
+		horizontal = Vector3.ZERO
 	velocity = Vector3(horizontal.x, (wanted_y - global_position.y) / maxf(delta, 0.001), horizontal.z)
 	move_and_slide()
 	_show_climb(7, minf(climb_finish_elapsed, climb_finish_duration))
@@ -420,14 +476,41 @@ func _roof_can_stand(point: Vector3) -> bool:
 	return true
 
 func _physics_climb_auto_advance(delta: float) -> void:
+	climb_roof_blend_left = maxf(0.0, climb_roof_blend_left - delta)
+	# The visual lean follows the tangent of the roof that is actually under
+	# Agnes. If the probe loses the roof, keep her upright rather than leaning
+	# into empty air. Physics remains upright and probes own the pull-up.
+	if climb_roof_blend_left > 0.0:
+		var contact := _roof_probe(global_position + climb_forward * 0.12, 0.35)
+		if not contact.is_empty(): climb_roof_normal = contact.normal as Vector3
+		var blend_phase := 1.0 - climb_roof_blend_left / CLIMB_ROOF_BLEND_DURATION
+		pivot.rotation.x = _roof_tangent_pitch(climb_roof_normal) * sin(blend_phase * PI) if not contact.is_empty() else 0.0
+	else:
+		pivot.rotation.x = 0.0
 	var to_target := climb_auto_walk_target - global_position
-	if to_target.length() < 0.06:
-		if _roof_can_stand(global_position):
+	if to_target.length() < 0.005:
+		climb_lip_settling = false
+		if climb_clearing_lip:
+			var roof_below := _roof_probe(global_position, 0.5)
+			climb_clearing_lip = false
+			if not roof_below.is_empty():
+				climb_auto_walk_target = roof_below.position + Vector3.UP * 0.04
+				climb_lip_settling = true
+				to_target = climb_auto_walk_target - global_position
+			else:
+				return
+		if climb_roof_blend_left > 0.0:
+			velocity = Vector3.ZERO
+			_show_climb(CRAWL, 0.0)
+			_update_camera()
+			return
+		if _roof_can_stand(global_position) and not climb_stand_started:
 			stand_support_time += delta
 			velocity = Vector3.ZERO
 			if stand_support_time >= STAND_SUPPORT_DELAY:
 				climb_auto_walk = false
 				stand_up_active = true
+				climb_stand_started = true
 				stand_up_elapsed = 0.0
 				stand_up_miss_time = 0.0
 				_show_climb(STAND_UP, 0.0)
@@ -452,10 +535,15 @@ func _physics_climb_auto_advance(delta: float) -> void:
 		if not roof.is_empty() and (roof.normal as Vector3).y >= 0.22 and rise <= reference_height_m * 0.95 and rise >= -0.3:
 			climb_auto_walk_target = roof.position + Vector3.UP * 0.04
 		to_target = climb_auto_walk_target - global_position
-	# Follow the sampled curve rather than a chord cutting through the roof.
-	velocity = to_target.normalized() * minf(CLIMB_AUTO_WALK_SPEED, to_target.length() / maxf(delta, 0.001))
-	# The coarse movement box can protrude beyond the visible roof. During
-	# this controlled traversal, the detailed ray samples own the position.
+	# Lift above a lip before advancing. A diagonal from the hanging position
+	# to a roof sample cuts through the wall, embedding the character's torso.
+	var travel := to_target
+	if to_target.y > 0.08:
+		travel = Vector3.UP * to_target.y
+	velocity = travel.normalized() * minf(CLIMB_AUTO_WALK_SPEED, travel.length() / maxf(delta, 0.001))
+	# The sampled route crosses the lip only after the capsule is above it.
+	# Direct, small steps keep a curved roof traversable; ordinary collision at
+	# roof level would snag on the shared edge between wall and roof.
 	global_position += velocity * delta
 	pivot.rotation.y = visual_yaw
 	var loop_length := players[8].current_animation_length
@@ -469,8 +557,9 @@ func _nearby_standing_patch() -> Vector3:
 		for step in 8:
 			var direction := climb_forward.rotated(Vector3.UP, float(step) * TAU / 8.0)
 			var hit := _roof_probe(global_position + direction * distance, 0.3)
-			if hit.is_empty() or not _roof_can_stand(hit.position): continue
+			if hit.is_empty(): continue
 			var target: Vector3 = hit.position + Vector3.UP * 0.04
+			if not _roof_can_stand(target): continue
 			var supported := true
 			for sample in range(1, 10):
 				var point := global_position.lerp(target, float(sample) / 10.0)
@@ -481,7 +570,18 @@ func _nearby_standing_patch() -> Vector3:
 			if supported: return target
 	return Vector3(NAN, NAN, NAN)
 
+func _roof_tangent_pitch(normal: Vector3) -> float:
+	# In local +Z (the climbing direction), a roof rising ahead has a normal
+	# facing slightly back. Its forward component gives the tangent's pitch.
+	var forward := climb_forward.normalized()
+	if forward.is_zero_approx() or normal.y < 0.22: return 0.0
+	return clampf(asin(clampf(normal.normalized().dot(forward), -0.95, 0.95)), -CLIMB_ROOF_MAX_LEAN, CLIMB_ROOF_MAX_LEAN)
+
 func _show_climb(index: int, time: float) -> void:
+	if index == CRAWL and climb_roof_blend_left > 0.0:
+		index = CLIMB
+		var length := players[CLIMB].current_animation_length
+		time = fposmod(climb_roof_pose_start + CLIMB_ROOF_BLEND_DURATION - climb_roof_blend_left, length) if length > 0.0 else 0.0
 	active_visual = index
 	for i in visuals.size():
 		visuals[i].visible = i == index
@@ -528,12 +628,17 @@ func _solid_climb_patch(direction: Vector3, reach: float) -> bool:
 	# a window reveal, a cornice -- can easily shift the hit depth between
 	# these probe heights by more than earlier fixed tolerances allowed for,
 	# which rejected plain flat walls almost everywhere; this only confirms
-	# the whole standing footprint actually meets solid, near-vertical wall.
+	# most of the standing footprint meets solid, near-vertical wall.
+	var solid_samples := 0
+	var upper_samples := 0
 	for height: float in [0.3, 0.82, 1.34]:
 		for side: float in [-collision_radius_m * 0.65, 0.0, collision_radius_m * 0.65]:
 			var hit := _facade_hit(direction, height * reference_height_m / 1.8, reach, side)
-			if hit.is_empty() or absf((hit.normal as Vector3).y) >= 0.22: return false
-	return true
+			if not hit.is_empty() and absf((hit.normal as Vector3).y) < 0.45:
+				solid_samples += 1
+				if height > 1.0: upper_samples += 1
+	# Permit a window seam or bevel, but require a broad shoulder-height wall.
+	return solid_samples >= 6 and upper_samples >= 2
 
 func _doorway_ahead(direction: Vector3) -> bool:
 	var facade_depth := INF
@@ -542,25 +647,32 @@ func _doorway_ahead(direction: Vector3) -> bool:
 		if not lintel.is_empty() and absf((lintel.normal as Vector3).y) < 0.22:
 			facade_depth = minf(facade_depth, ((lintel.position as Vector3) - global_position).dot(direction))
 	if is_inf(facade_depth): return false
-	var open_samples := 0
-	for fraction: float in [0.2, 0.45, 0.7]:
-		var hit := _facade_hit(direction, reference_height_m * fraction, 1.7)
-		if hit.is_empty() or ((hit.position as Vector3) - global_position).dot(direction) > facade_depth + 0.35:
-			open_samples += 1
-	return open_samples >= 2
+	# Require jambs on both sides: a full-width upper-floor overhang is not a door.
+	for sign_value: float in [-1.0, 1.0]:
+		var jamb_found := false
+		for width: float in [0.45, 0.75, 1.05]:
+			var jamb := _facade_hit(direction, reference_height_m * 0.4, 2.4, width * sign_value)
+			if not jamb.is_empty() and absf((jamb.normal as Vector3).y) < 0.45 and absf(((jamb.position as Vector3) - global_position).dot(direction) - facade_depth) < 0.25:
+				jamb_found = true
+		if not jamb_found: return false
+	# A doorway is open from the feet through the torso and across body width.
+	# A projecting cornice or a window above a solid plinth is not a doorway.
+	for side: float in [-collision_radius_m * 0.65, 0.0, collision_radius_m * 0.65]:
+		for fraction: float in [0.12, 0.4, 0.7]:
+			var hit := _facade_hit(direction, reference_height_m * fraction, 2.4, side)
+			if not hit.is_empty() and ((hit.position as Vector3) - global_position).dot(direction) <= facade_depth + 0.35:
+				return false
+	return true
 
 func _physics_stand_up(delta: float) -> void:
 	velocity = Vector3.ZERO
 	if not _roof_can_stand(global_position):
 		stand_up_miss_time += delta
 		if stand_up_miss_time > STAND_UP_SUPPORT_GRACE:
-			stand_up_active = false
-			stand_support_time = 0.0
-			stand_up_miss_time = 0.0
-			climb_auto_walk = true
-			climb_auto_walk_target = global_position
-			_show_climb(CRAWL, 0.0)
-			return
+			# This is a failed landing, not permission to replay Stand_Up2. Finish
+			# standing once; normal physics can then resolve a genuinely unsupported
+			# landing instead of looping crawl -> stand forever.
+			stand_up_miss_time = STAND_UP_SUPPORT_GRACE
 	else:
 		stand_up_miss_time = 0.0
 	stand_up_elapsed += delta
@@ -572,3 +684,9 @@ func _physics_stand_up(delta: float) -> void:
 		stand_support_time = 0.0
 		set_collision_mask_value(2, true)
 		_sync_visual(false, false)
+		if climb_requested:
+			call_deferred("_continue_climb_if_requested")
+
+func _continue_climb_if_requested() -> void:
+	if climb_requested and not stand_up_active and not climb_active and not climb_finishing and not climb_auto_walk:
+		_try_start_climb()

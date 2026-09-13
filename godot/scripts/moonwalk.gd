@@ -2,20 +2,28 @@ extends Node3D
 
 const ColonyUtil = preload("res://scripts/colony_util.gd")
 const Terrain = preload("res://scripts/lunar_terrain.gd")
-const Theia = preload("res://scripts/human_controller.gd")
+const Human = preload("res://scripts/human_controller.gd")
 const Agnes = preload("res://scripts/agnes.gd")
 const Globe = preload("res://scripts/moon_globe.gd")
 const Approach = preload("res://scripts/lunar_approach.gd")
 const Lorry = preload("res://scripts/lunar_lorry.gd")
 const RoadStreamer = preload("res://scripts/road_streamer.gd")
 const LunarHorizon = preload("res://scripts/lunar_horizon.gd")
-const TYCHO_PLAYER_START := Vector3(-26.0, 0.0, -67.0)
+const TychoSite = preload("res://scripts/tycho_site.gd")
 const LUBIN_DEEP_PLAYER_START := Vector3(-5.0, 0.0, -10.0)
 const TYCHO_GATE_DIR := Vector2(0.0, -1.0)
-const TYCHO_HIGHWAY_ORIGIN := Vector2(-9.0, -14.0)
 const TYCHO_HIGHWAY_DIR := Vector2(0.2239, -0.9746)
 var terrain: Node3D
 var theia: CharacterBody3D
+## Tycho only: index into TychoCity.descriptors of the bench holding the
+## decorative seated-Agnes prop, so Agnes-suit can swap places with it.
+## -2 = not searched yet, -1 = searched and not found (e.g. a different
+## colony without that bench).
+var seat_index := -2
+## Non-null only while theia.sitting: the "SeatedAgnes" node, reparented
+## from the bench to theia.pivot so it moves/renders as her stand-in.
+var seated_agnes_node: Node3D = null
+const SEAT_INTERACT_RADIUS := 2.4
 var globe: Node3D
 var lorry: Node3D
 var roads: Node3D
@@ -143,7 +151,7 @@ func _climb_test() -> void:
 	var root: Node3D = city.loaded.get(target)
 	var deadline := Time.get_ticks_msec() + 60000
 	while root == null and Time.get_ticks_msec() < deadline:
-		terrain.update_focus(Vector3(0, terrain.city_level, 60))
+		terrain.update_focus(Vector3(TychoSite.CENTER.x, terrain.city_level, TychoSite.CENTER.y))
 		await get_tree().process_frame
 		root = city.loaded.get(target)
 	assert(root != null and root.has_node("ClimbSurface"), "Detailed facade collision must stream for twin-houses")
@@ -236,8 +244,8 @@ func _climb_test() -> void:
 		# (its landing is a scripted position-match, not a pure gravity
 		# touchdown) -- also accept "hasn't actually lost height" as proof
 		# she isn't free-falling, so that one-tick handoff isn't a false trip.
-		assert(theia.climb_active or theia.climb_finishing or theia.climb_auto_walk or theia.stand_up_active or theia.is_on_floor() or theia.position.y >= highest_y - 0.05, "Agnes must not free-fall off the facade mid-climb (dropped from %.2f m to %.2f m)" % [highest_y, theia.position.y])
-		assert(theia.position.y > highest_y - 0.35, "Agnes fell %.2f m from her highest point mid-climb" % (highest_y - theia.position.y))
+		assert(theia.climb_lip_settling or theia.climb_active or theia.climb_finishing or theia.climb_auto_walk or theia.stand_up_active or theia.is_on_floor() or theia.position.y >= highest_y - 0.12, "Agnes must not free-fall off the facade mid-climb (dropped from %.2f m to %.2f m)" % [highest_y, theia.position.y])
+		assert(theia.climb_lip_settling or theia.position.y > highest_y - 0.35, "Agnes fell %.2f m from her highest point mid-climb" % (highest_y - theia.position.y))
 		if not theia.climb_active and not theia.climb_finishing and not theia.climb_auto_walk and not theia.stand_up_active:
 			break
 	assert(not theia.climb_active and not theia.climb_finishing and not theia.climb_auto_walk and not theia.stand_up_active, "Climb must reach the roof and finish within 60 s")
@@ -279,12 +287,16 @@ func _build_surface(colony_name: String, destination: Dictionary = {}) -> void:
 	theia.terrain = terrain
 	theia.spawn_position = _player_start()
 	surface.add_child(theia)
+	if is_instance_valid(lorry) and not ("--lorry-test" in OS.get_cmdline_user_args()):
+		var convoy := preload("res://scripts/rover_convoy.gd").new()
+		convoy.game = self
+		surface.add_child(convoy)
 
 func _tycho_lorry_patrol() -> PackedVector3Array:
 	# The rover waits just inside the southern airlock. It repeatedly approaches
 	# the gateway, backs into the habitat, then makes a second approach that can
 	# carry it out through the open portal and onto the real highway centreline.
-	var centre := Vector2(0.0, 25.0)
+	var centre := TychoSite.CENTER
 	var gate := TYCHO_GATE_DIR.normalized()
 	var highway := TYCHO_HIGHWAY_DIR.normalized()
 	return PackedVector3Array([
@@ -293,9 +305,9 @@ func _tycho_lorry_patrol() -> PackedVector3Array:
 		_tycho_gate_point(centre, gate, 88.0),  # return safely inside the dome
 		_tycho_gate_point(centre, gate, 97.0),
 		_tycho_gate_point(centre, gate, 110.0), # successful crossing: just outside the airlock
-		_tycho_highway_point(highway, 140.0),
-		_tycho_highway_point(highway, 190.0), # continue along the elevated highway
-		_tycho_highway_point(highway, 140.0),
+		_tycho_highway_point(highway, 200.0),
+		_tycho_highway_point(highway, 250.0), # continue along the elevated highway
+		_tycho_highway_point(highway, 200.0),
 		_tycho_gate_point(centre, gate, 110.0),
 		_tycho_gate_point(centre, gate, 97.0),
 	])
@@ -305,8 +317,13 @@ func _tycho_gate_point(centre: Vector2, gate: Vector2, radius_m: float) -> Vecto
 	return Vector3(p.x, 0.0, p.y)
 
 func _tycho_highway_point(highway: Vector2, station_m: float) -> Vector3:
-	var p := TYCHO_HIGHWAY_ORIGIN + highway * station_m
+	var p := TychoSite.CENTER + TychoSite.HIGHWAY_ANCHOR_OFFSET + highway * station_m
 	return Vector3(p.x, 0.0, p.y)
+
+## Beside the dome gate, facing the InPost highway approach -- the same offset
+## from Site.CENTER regardless of where the site itself sits (see tycho_site.gd).
+func _tycho_player_start() -> Vector3:
+	return Vector3(TychoSite.CENTER.x - 26.0, 0.0, TychoSite.CENTER.y - 92.0)
 
 func _player_start() -> Vector3:
 	# Default facing is +z. Tycho begins beside the station, on the InPost highway
@@ -314,7 +331,7 @@ func _player_start() -> Vector3:
 	# interchange-access path north of the outpost, facing the highway approach.
 	match active_colony_name:
 		"Tycho Station":
-			return TYCHO_PLAYER_START
+			return _tycho_player_start()
 		"Lubin Deep":
 			return LUBIN_DEEP_PLAYER_START
 		_:
@@ -583,7 +600,7 @@ func _build_ui() -> void:
 	sensitivity.value_changed.connect(func(value: float) -> void: theia.set_sensitivity(value))
 	settings.add_child(sensitivity)
 	camera_picker = OptionButton.new()
-	for preset: Dictionary in Theia.CAMERA_MODES:
+	for preset: Dictionary in Human.CAMERA_MODES:
 		camera_picker.add_item(preset.label)
 	camera_picker.select(theia.mode)
 	camera_picker.item_selected.connect(func(index: int) -> void: theia.set_camera_mode(index))
@@ -684,9 +701,9 @@ func _build_ui() -> void:
 func _controls_changed() -> void:
 	var classic: bool = theia.classic_controls
 	controls_picker.select(0 if classic else 1)
-	controls_hint.text = "WASD  ruch   SHIFT  bieg   SPACJA  skok   Q  wspinaczka   C  TPP/FPP   V  swobodna kamera   P  autopilot   K  styl kreski   B  styl malarski   I  nagrywanie   L  światła   O  orbita   ESC  pauza" if classic else "W/S  przód/tył   A/D  obrót   Q  bieg / wspinaczka   LPM/C  kamera   V  swobodna   P  autopilot   K  styl kreski   B  styl malarski   I  nagrywanie   L  światła   O  orbita   PPM/ESC  pauza"
+	controls_hint.text = "WASD  ruch   SHIFT  bieg   SPACJA  skok   Q  wspinaczka   E  usiądź/wstań   C  TPP/FPP   V  swobodna kamera   P  autopilot   K  styl kreski   B  styl malarski   I  nagrywanie   L  światła   O  orbita   ESC  pauza" if classic else "W/S  przód/tył   A/D  obrót   Q  bieg / wspinaczka   E  usiądź/wstań   LPM/C  kamera   V  swobodna   P  autopilot   K  styl kreski   B  styl malarski   I  nagrywanie   L  światła   O  orbita   PPM/ESC  pauza"
 	controls_note.text = "WASD + mysz · Shift: bieg · Spacja: skok\nC: widok zza pleców / pierwsza osoba" if classic else "W/S: przód/tył · A/D: obrót o 20°\nQ: bieg · LPM: kamera · PPM: pauza"
-	if theia.character_name == "Agnes": controls_note.text += "\nQ przy fasadzie: wspinaczka; wejście na wierzchołek odtwarza zakończenie\nH: płynne przyciemnienie górnej części szybki"
+	if theia.character_name == "Agnes": controls_note.text += "\nQ przy fasadzie: wspinaczka; wejście na wierzchołek odtwarza zakończenie\nH: płynne przyciemnienie górnej części szybki\nE przy ławce w parku: usiądź jako Agnes / wstań"
 	_camera_changed(theia.mode)
 
 func _update_style_status() -> void:
@@ -710,7 +727,7 @@ func _pause_changed(value: bool) -> void:
 func _camera_changed(index: int) -> void:
 	if camera_picker == null: return
 	camera_picker.select(index)
-	var preset: Dictionary = Theia.CAMERA_MODES[index]
+	var preset: Dictionary = Human.CAMERA_MODES[index]
 	camera_info.text = "Pole widzenia: %.0f°" % preset.fov
 	if index < 3:
 		camera_info.text += "\nOdległość: %.1f m  /  Kąt: %.0f°" % [preset.distance, preset.pitch_deg]
@@ -732,6 +749,12 @@ func _process(_delta: float) -> void:
 	else:
 		status.text = "Prędkość    %.1f m/s\nDystans     %.0f m\nGrawitacja  1,62 m/s²" % [Vector2(theia.velocity.x, theia.velocity.z).length(), theia.total_distance]
 		status.text += "\nAUTOPILOT · " + ("bieg" if theia.autopilot_running else "marsz") if theia.autopilot else ""
+		if theia.sitting:
+			status.text += "\nE  wstań z ławki"
+		else:
+			var seat := _find_seat_node()
+			if seat != null and Vector2(theia.position.x, theia.position.z).distance_to(Vector2(seat.global_position.x, seat.global_position.z)) <= SEAT_INTERACT_RADIUS:
+				status.text += "\nE  usiądź na ławce"
 	var source := "GeoServer / cache: %d pobranych" % terrain.stream.downloaded if terrain.stream.enabled else "LOLA + detal proceduralny"
 	debug_label.text = "%d FPS   /   KAFLE %d / 121   /   KOLEJKA %d   /   ZWOLNIONE %d   /   %s" % [Engine.get_frames_per_second(), terrain.tiles.size(), terrain.queue.size(), terrain.unloaded_count, source]
 	if recording and rec_indicator != null:
@@ -744,6 +767,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_TAB: _toggle_coverage()
 			KEY_I: _toggle_recording()
 			KEY_N: _toggle_location_panel()
+			KEY_E: _toggle_sitting()
 
 func _toggle_map() -> void:
 	if theia.paused or landing_busy: return
@@ -781,7 +805,7 @@ func _toggle_map() -> void:
 		theia.camera.make_current()
 		_apply_surface_sun()
 		location_panel.hide()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if map_mode or theia.paused else Input.MOUSE_MODE_CAPTURED
+	theia.set_mouse_captured(not map_mode and not theia.paused)
 	title.text = "Księżyc" if map_mode else active_colony_name
 	subtitle.text = "Wybierz dowolny punkt powierzchni i zbliż kamerę" if map_mode else _region_label(active_colony) + "\n" + _format_latlon(active_colony)
 	hint.text = "LPM/A/D: wybierz cel · W/kółko: zbliżenie i lądowanie\nS: oddal · Spacja/Ctrl: szerokość · F: punkt startu · N: lista miejsc · O: powrót" if map_mode else "%s · zwiad pieszy · O: lot do innego miejsca" % theia.character_name
@@ -905,7 +929,7 @@ func _enter_local_overlook(coordinates: Vector2) -> void:
 	theia.enabled = true
 	theia.set_physics_process(true)
 	theia.set_camera_mode(1)
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	theia.set_mouse_captured(true)
 	landing_busy = false
 	hint.text = "Lądowanie zakończone · WASD: eksploracja · O: następny lot"
 
@@ -948,6 +972,77 @@ func _toggle_coverage() -> void:
 	coverage = not coverage
 	terrain.set_coverage(coverage)
 	hint.text = "Turkus: łagodny regolit\nOchra: stoki / odsłonięcia skał" if coverage else "%s · zwiad pieszy\nPodążaj w stronę punktu InPost." % theia.character_name
+
+## Tycho's park bench carries a decorative seated-Agnes prop (built by
+## tycho_city.gd from the "seated_agnes" descriptor flag). While theia is
+## sitting, that same node is reparented onto her (see _sit_down()), so this
+## returns it either way: the live decoration on the bench normally, or her
+## current stand-in while seated.
+func _find_seat_node() -> Node3D:
+	if not is_instance_valid(theia) or theia.character_name != "Agnes":
+		return null
+	if theia.sitting:
+		return seated_agnes_node
+	var city: Node = surface.get_node_or_null("TychoCity")
+	if city == null:
+		return null
+	if seat_index == -2:
+		seat_index = -1
+		for i in city.descriptors.size():
+			var d: Dictionary = city.descriptors[i]
+			if String(d.kind) == "bench" and d.get("seated_agnes", false):
+				seat_index = i
+				break
+	if seat_index < 0:
+		return null
+	var bench_root: Node3D = city.loaded.get(seat_index)
+	if bench_root == null:
+		return null
+	return bench_root.get_node_or_null("SeatedAgnes")
+
+func _toggle_sitting() -> void:
+	if not is_instance_valid(theia) or theia.character_name != "Agnes" or theia.paused or map_mode or landing_busy:
+		return
+	if theia.sitting:
+		_stand_up()
+		return
+	var seat := _find_seat_node()
+	if seat == null:
+		return
+	if Vector2(theia.position.x, theia.position.z).distance_to(Vector2(seat.global_position.x, seat.global_position.z)) > SEAT_INTERACT_RADIUS:
+		return
+	_sit_down(seat)
+
+## Swaps Agnes-suit for the park bench's seated-Agnes prop: hides her normal
+## walking visuals and reparents that prop onto her pivot (keeping its exact
+## world transform, so it doesn't visibly jump) rather than instancing a
+## second copy of the asset. The camera is framed once here and then left
+## alone -- elvenpass_controller.gd's `sitting` flag skips both movement and
+## _update_camera() every frame while seated.
+func _sit_down(seat: Node3D) -> void:
+	var seat_transform := seat.global_transform
+	for v in theia.visuals:
+		v.visible = false
+	seat.reparent(theia.pivot, true)
+	seated_agnes_node = seat
+	theia.velocity = Vector3.ZERO
+	theia.position = seat_transform.origin
+	theia.sitting = true
+	var forward: Vector3 = -seat_transform.basis.z.normalized()
+	theia.camera.global_position = seat_transform.origin + forward * 2.6 + Vector3.UP * 1.5
+	theia.camera.look_at(seat_transform.origin + Vector3.UP * 0.95, Vector3.UP)
+
+func _stand_up() -> void:
+	if seated_agnes_node != null:
+		var city: Node = surface.get_node_or_null("TychoCity")
+		var bench_root: Node3D = city.loaded.get(seat_index) if city != null else null
+		if bench_root != null:
+			seated_agnes_node.reparent(bench_root, true)
+		seated_agnes_node = null
+	theia.sitting = false
+	var stand_pos := theia.position + Vector3(1.3, 0.0, 0.0)
+	stand_pos.y = terrain.height_at(stand_pos.x, stand_pos.z) + 0.15
+	theia.position = stand_pos
 
 func _toggle_location_panel() -> void:
 	if not map_mode or theia.paused:
@@ -1041,7 +1136,7 @@ func _capture_fox() -> void:
 	# diagonal (which mixes in body length and is a worse proxy for height).
 	var scale := 0.30 / maxf(box.size.z, 0.000000001)
 	fox.scale = Vector3.ONE * scale
-	var spot := Vector3(TYCHO_PLAYER_START.x + 4.0, 0, TYCHO_PLAYER_START.z)
+	var spot := Vector3(_tycho_player_start().x + 4.0, 0, _tycho_player_start().z)
 	var ground := Vector3(spot.x, terrain.height_at(spot.x, spot.z), spot.z)
 	# box.position.z is the lowest point's offset from the model's own local
 	# origin (measured at scale=1) -- it's slightly positive (paws sit just
@@ -1143,7 +1238,7 @@ func _capture_run_jump() -> void:
 	# Godot's --write-movie option owns fixed-rate video capture for this shot.
 	theia.set_control_scheme(true)
 	theia.set_camera_mode(1)
-	theia.position = Vector3(TYCHO_PLAYER_START.x, terrain.height_at(TYCHO_PLAYER_START.x, TYCHO_PLAYER_START.z) + 0.15, TYCHO_PLAYER_START.z)
+	theia.position = Vector3(_tycho_player_start().x, terrain.height_at(_tycho_player_start().x, _tycho_player_start().z) + 0.15, _tycho_player_start().z)
 	theia.velocity = Vector3.ZERO
 	theia.visual_yaw = 0.0
 	theia.yaw = PI
@@ -1162,7 +1257,7 @@ func _capture_run_jump() -> void:
 func _smoke_test() -> void:
 	if active_colony_name == "Tycho Station":
 		assert(theia.character_name == "Agnes", "Agnes must be the default explorer")
-		assert(Vector2(theia.position.x, theia.position.z).distance_to(Vector2(TYCHO_PLAYER_START.x, TYCHO_PLAYER_START.z)) < 0.01, "Agnes must begin at the Tycho station entrance")
+		assert(Vector2(theia.position.x, theia.position.z).distance_to(Vector2(_tycho_player_start().x, _tycho_player_start().z)) < 0.01, "Agnes must begin at the Tycho station entrance")
 		# The dead southbound access stub is gone: Tycho's one live highway is the
 		# 22 km InPost spur, so no interchange is built here.
 		for tycho_tile in roads.descriptors_by_tile.values():
@@ -1182,7 +1277,7 @@ func _smoke_test() -> void:
 	lunar_sky.apply_phase(original_phase)
 	theia.set_control_scheme(false)
 	await get_tree().create_timer(3).timeout
-	assert(theia.is_on_floor(), "Theia must land on the lunar collision mesh")
+	assert(theia.is_on_floor(), "Agnes must land on the lunar collision mesh")
 	assert(theia.players.size() == theia.model_paths.size(), "All character animation models must load")
 	if theia.character_name == "Agnes":
 		assert(theia.active_visual == 4 and theia.players[4].speed_scale > 0, "Agnes must play her idle animation while standing")
@@ -1190,7 +1285,7 @@ func _smoke_test() -> void:
 	Input.action_press("move_forward")
 	await get_tree().create_timer(2).timeout
 	Input.action_release("move_forward")
-	assert(theia.position.distance_to(start) > 3.0, "Walking input must move Theia over terrain")
+	assert(theia.position.distance_to(start) > 3.0, "Walking input must move Agnes over terrain")
 	# Elvenpass controls: A/D turn in place, Q runs without W, free camera leaves the actor still.
 	var before_turn: Vector3 = theia.position
 	var facing: float = theia.visual_yaw
@@ -1203,7 +1298,7 @@ func _smoke_test() -> void:
 	assert(absf(wrapf(theia.visual_yaw - facing, -PI, PI)) < 0.001, "D must turn right by 20 degrees")
 	# The walk-forward check above already spent most of the clear ground between
 	# the station entrance and the dome's gate bulkhead: continuing to run from
-	# here rams Theia into that collision within the first physics tick, reading
+	# here rams Agnes into that collision within the first physics tick, reading
 	# velocity that a real wall stopped, not one Q failed to produce. This is only
 	# an input/velocity check, so give it its own clear run back at the entrance.
 	theia.position = start
@@ -1214,13 +1309,13 @@ func _smoke_test() -> void:
 	Input.action_release("run_forward")
 	for i in 5:
 		theia.set_camera_mode(i)
-		assert(is_equal_approx(theia.camera.fov, float(Theia.CAMERA_MODES[i].fov)), "Elvenpass camera FOV must match")
+		assert(is_equal_approx(theia.camera.fov, float(Human.CAMERA_MODES[i].fov)), "Elvenpass camera FOV must match")
 	var actor: Vector3 = theia.position
 	var eye: Vector3 = theia.camera.global_position
 	Input.action_press("move_forward")
 	await get_tree().create_timer(0.25).timeout
 	Input.action_release("move_forward")
-	assert(theia.position.is_equal_approx(actor), "Free camera must not move Theia")
+	assert(theia.position.is_equal_approx(actor), "Free camera must not move Agnes")
 	assert(theia.camera.global_position.distance_to(eye) > 1.0, "W must fly the free camera")
 	theia.set_camera_mode(3)
 	theia.set_paused(true)

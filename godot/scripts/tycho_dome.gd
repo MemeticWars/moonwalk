@@ -19,11 +19,27 @@ var edge_count := 0
 ## Set by the caller before the node enters the tree.
 var gate_angle := 0.0
 var gate_arc := 0.0
+## Scaled instances (the east annex's mini-domes) set these before entering
+## the tree; RADIUS/HEIGHT stay the D1 defaults so roof_height() below (used
+## by tycho_weather.gd for the main dome's own rain ceiling) is unaffected.
+var dome_radius := RADIUS
+var dome_height := HEIGHT
+## Plain doorway-sized holes for inter-dome airlock tunnels: no bulkhead, no
+## portal model (unlike the single highway gate_angle/gate_arc above) --
+## the connecting tunnel mesh built by tycho_east_annex.gd plugs the gap.
+## Each entry: {angle: float, arc: float, cut_height: float}.
+var extra_cuts: Array[Dictionary] = []
 
 func _in_gate(p: Vector3) -> bool:
 	if gate_arc <= 0.0 or p.y > GATE_CUT_HEIGHT:
 		return false
 	return absf(wrapf(atan2(p.z, p.x) - gate_angle, -PI, PI)) < gate_arc
+
+func _in_extra_cut(p: Vector3) -> bool:
+	for cut: Dictionary in extra_cuts:
+		if p.y <= cut.cut_height and absf(wrapf(atan2(p.z, p.x) - cut.angle, -PI, PI)) < cut.arc:
+			return true
+	return false
 
 static func roof_height(radius: float) -> float:
 	return HEIGHT * sqrt(maxf(0.0, 1.0 - pow(radius / RADIUS, 2.0)))
@@ -35,8 +51,8 @@ func _ready() -> void:
 		var elevation := float(ring) / BANDS * PI * 0.5
 		for sector in SECTORS:
 			var angle := TAU * float(sector) / SECTORS
-			points.append(Vector3(RADIUS * cos(elevation) * cos(angle), HEIGHT * sin(elevation), RADIUS * cos(elevation) * sin(angle)))
-	points.append(Vector3(0, HEIGHT, 0))
+			points.append(Vector3(dome_radius * cos(elevation) * cos(angle), dome_height * sin(elevation), dome_radius * cos(elevation) * sin(angle)))
+	points.append(Vector3(0, dome_height, 0))
 	var faces: Array[Vector3i] = []
 	for ring in BANDS - 1:
 		for sector in SECTORS:
@@ -84,6 +100,9 @@ func _ready() -> void:
 					hole_seeded = true
 				else:
 					hole_box = hole_box.expand(p)
+			continue
+		if _in_extra_cut(center):
+			open_faces += 1
 			continue
 		var normal := (b - a).cross(c - a).normalized()
 		if normal.dot(center) < 0:
@@ -148,8 +167,8 @@ func _ready() -> void:
 	frame.multimesh = multi
 	add_child(frame)
 	var rim := TorusMesh.new()
-	rim.inner_radius = RADIUS - 0.35
-	rim.outer_radius = RADIUS + 0.35
+	rim.inner_radius = dome_radius - 0.35
+	rim.outer_radius = dome_radius + 0.35
 	rim.rings = 192
 	rim.ring_segments = 8
 	rim.material = frame_material
@@ -185,7 +204,7 @@ func _add_gate_portal() -> void:
 		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	if not seeded:
 		return
-	var opening_width := 2.0 * RADIUS * sin(gate_arc)
+	var opening_width := 2.0 * dome_radius * sin(gate_arc)
 	# The model's local +X (not +Z) is its passage axis -- align it with the
 	# outward radial, so +Z (the wide face) spans the opening instead.
 	var scale := minf(opening_width * 1.02 / maxf(box.size.z, 0.01), GATE_HEIGHT * 1.6 / maxf(box.size.y, 0.01))
@@ -193,7 +212,7 @@ func _add_gate_portal() -> void:
 	var radial := Vector3(cos(gate_angle), 0.0, sin(gate_angle))
 	portal.rotation.y = atan2(radial.x, radial.z) + PI * 0.5
 	var depth := box.size.x * scale
-	portal.position = radial * (RADIUS - 2.0 + depth * 0.5) - Vector3(0.0, box.position.y * scale, 0.0)
+	portal.position = radial * (dome_radius - 2.0 + depth * 0.5) - Vector3(0.0, box.position.y * scale, 0.0)
 	# Collide with the gate's own surface, not a box around it -- but the model
 	# is a single solid mesh, not a true hollow archway, so its raw trimesh
 	# blocks straight-through traffic. Carve a clear driving lane out of the
