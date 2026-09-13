@@ -6,6 +6,14 @@ class FlatTerrain extends Node3D:
 	func has_ground(_point: Vector3) -> bool:
 		return true
 
+class FakeRoads extends Node:
+	var descriptors_by_tile: Dictionary = {
+		Vector2i.ZERO: [{"a": Vector3(-100, 0, 0), "b": Vector3(100, 0, 0)}]
+	}
+
+class FakeGame extends Node:
+	var roads: Node
+
 func _initialize() -> void:
 	run.call_deferred()
 
@@ -33,6 +41,10 @@ func run() -> void:
 	await create_timer(4).timeout
 	assert(rover.rig_ready and truck.rig_ready)
 	assert(rover.vwheels.size() == 4 and truck.vwheels.size() == 8)
+	assert(is_equal_approx(rover.drive_speed_limit() * 3.6, 28.8), "Normal rover speed limit must remain 28.8 km/h")
+	rover.drive_boost = true
+	assert(is_equal_approx(rover.drive_speed_limit() * 3.6, 40.0), "Shift boost must raise rover limit to 40 km/h")
+	rover.drive_boost = false
 	var start := rover.position
 	var truck_start := truck.position
 	rover.drive_brake = false
@@ -60,6 +72,12 @@ func run() -> void:
 	follower.trucks.append(truck)
 	follower.paths.append([])
 	follower.last_leader.append(rover.position)
+	var fake_game := FakeGame.new()
+	fake_game.roads = FakeRoads.new()
+	follower.game = fake_game
+	var axis := follower._nearest_road_axis(Vector3(8, 0, 6))
+	assert(not axis.is_empty() and absf(axis.point.z) < 0.001 and absf(axis.tangent.x) > 0.99,
+		"Road autopilot must project the rover onto the nearest road axis")
 	var follow_start := truck.position
 	rover.drive_brake = false
 	rover.drive_throttle = 0.65

@@ -60,8 +60,11 @@ var controlled := false
 var drive_throttle := 0.0
 var drive_steer := 0.0
 var drive_brake := true
+var drive_boost := false
 const LUNAR_GRAVITY := 1.62
 const MAX_DRIVE_SPEED := 8.0
+const BOOST_DRIVE_SPEED := 40.0 / 3.6 # 40 km/h
+const BOOST_ENGINE_MULTIPLIER := 1.8
 const REGOLITH_GRIP := 0.8
 
 var route := PackedVector3Array([
@@ -354,7 +357,7 @@ func _drive(delta: float) -> void:
 		if wheel.is_in_contact():
 			contacts += 1
 	var speed := linear_velocity.dot(-global_basis.z)
-	var speed_limit := MAX_DRIVE_SPEED if drive_throttle >= 0 else 2.5
+	var speed_limit := drive_speed_limit() if drive_throttle >= 0 else 2.5
 	# Limit lateral acceleration to the traction available at lunar weight.
 	var limit := minf(STEER_LIMIT, atan(REGOLITH_GRIP * LUNAR_GRAVITY * 3.5 / maxf(speed * speed, 0.1)))
 	steering = move_toward(steering, drive_steer * limit, delta * 0.6)
@@ -367,7 +370,8 @@ func _drive(delta: float) -> void:
 			brake = traction / maxf(vwheels.size(), 1)
 		elif absf(speed) < speed_limit:
 			# VehicleBody's positive engine direction is +Z; this model faces -Z.
-			engine_force = -drive_throttle * minf(drive_engine_pull(), traction) / maxf(vwheels.size(), 1)
+			var pull := drive_engine_pull() * (BOOST_ENGINE_MULTIPLIER if drive_boost and drive_throttle > 0.0 else 1.0)
+			engine_force = -drive_throttle * minf(pull, traction) / maxf(vwheels.size(), 1)
 		# Rolling resistance acts only on the ground, never as airborne drag.
 		var horizontal := Vector3(linear_velocity.x, 0, linear_velocity.z)
 		if horizontal.length() > 0.01:
@@ -392,6 +396,9 @@ func _build_track_renderer() -> void:
 
 func drive_engine_pull() -> float:
 	return ENGINE_PULL
+
+func drive_speed_limit() -> float:
+	return BOOST_DRIVE_SPEED if drive_boost else MAX_DRIVE_SPEED
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_L:

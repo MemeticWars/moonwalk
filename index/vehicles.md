@@ -2,7 +2,7 @@
 
 Lorry czeka na kierowcę w istniejącej lokalizacji łazika. Podejdź na mniej niż 8 m i naciśnij **E**, aby wsiąść; ponowne **E** pozwala wysiąść po zatrzymaniu, jeśli obok znajduje się dostatecznie płaski, wolny grunt. W kabinie Agnes ma wyłączone sterowanie piesze i kolizję, a kamera śledzi łazik z kontrolą przeszkód.
 
-Sterowanie: **W** napęd do przodu, **S** hamowanie przed przejściem na wsteczny, **A/D** skręt, **Spacja** hamulec, **E** wysiadanie, **L** światła, **Esc** pauza całego konwoju. Prędkości graniczne napędu wynoszą 8 m/s do przodu i 2,5 m/s wstecz; spadek może dodatkowo rozpędzać pojazd i wymaga hamowania. Puszczenie gazu pozostawia pęd, a wyjście z kabiny włącza hamulec postojowy.
+Sterowanie: **W** napęd do przodu, **S** hamowanie przed przejściem na wsteczny, **A/D** skręt, **Shift** przyspieszenie do 40 km/h, **P** włącza/wyłącza prowadzenie Lorry po osi najbliższej drogi, **Spacja** hamulec, **E** wysiadanie, **L** światła, **Esc** pauza całego konwoju. W trybie prowadzenia W/S/A/D lub Spacja od razu oddają sterowanie kierowcy. Prędkości graniczne napędu wynoszą 8 m/s do przodu (11,11 m/s z Shiftem) i 2,5 m/s wstecz; spadek może dodatkowo rozpędzać pojazd i wymaga hamowania. Puszczenie gazu pozostawia pęd, a wyjście z kabiny włącza hamulec postojowy.
 
 ## Fizyka
 

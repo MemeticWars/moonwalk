@@ -13,6 +13,7 @@ var label := Label.new()
 var old_layer := 0
 var old_mask := 0
 var notice := ""
+var road_following := false
 
 func _ready() -> void:
 	process_priority = -10
@@ -80,6 +81,12 @@ func _input(event: InputEvent) -> void:
 				actor.set_paused(not actor.paused)
 			elif event.physical_keycode == KEY_L:
 				rover.set_light_mode(rover.light_mode + 1)
+			elif event.physical_keycode == KEY_P:
+				road_following = not road_following
+				notice = "Prowadzenie po osi drogi" if road_following else "Sterowanie ręczne"
+			elif event.physical_keycode in [KEY_W, KEY_S, KEY_A, KEY_D, KEY_SPACE]:
+				road_following = false
+				notice = "Sterowanie ręczne"
 			# Walking, bench and orbital controls must not run inside the rover.
 			get_viewport().set_input_as_handled()
 
@@ -87,6 +94,7 @@ func _enter_rover() -> void:
 	if not rover.rig_ready or rover.linear_velocity.length() > 0.5:
 		return
 	driving = true
+	road_following = false
 	actor.stop_autopilot()
 	actor.enabled = false
 	actor.set_physics_process(false)
@@ -123,7 +131,9 @@ func _exit_rover() -> void:
 		if not space.intersect_shape(query, 1).is_empty():
 			continue
 		driving = false
+		road_following = false
 		rover.drive_throttle = 0
+		rover.drive_boost = false
 		rover.drive_brake = true
 		actor.global_position = p
 		actor.velocity = Vector3.ZERO
@@ -148,9 +158,13 @@ func _physics_process(delta: float) -> void:
 	if driving:
 		actor.global_position = rover.global_position
 		game.terrain.update_focus(rover.global_position)
-		rover.drive_throttle = 0.0 if suspended else float(Input.is_physical_key_pressed(KEY_W)) - float(Input.is_physical_key_pressed(KEY_S))
-		rover.drive_steer = 0.0 if suspended else float(Input.is_physical_key_pressed(KEY_A)) - float(Input.is_physical_key_pressed(KEY_D))
-		rover.drive_brake = suspended or Input.is_physical_key_pressed(KEY_SPACE)
+		rover.drive_boost = not suspended and Input.is_physical_key_pressed(KEY_SHIFT)
+		if road_following:
+			_drive_road_axis(suspended)
+		else:
+			rover.drive_throttle = 0.0 if suspended else float(Input.is_physical_key_pressed(KEY_W)) - float(Input.is_physical_key_pressed(KEY_S))
+			rover.drive_steer = 0.0 if suspended else float(Input.is_physical_key_pressed(KEY_A)) - float(Input.is_physical_key_pressed(KEY_D))
+			rover.drive_brake = suspended or Input.is_physical_key_pressed(KEY_SPACE)
 		var target := rover.global_position + Vector3.UP * 2.5
 		var desired := target + rover.global_basis.z * 12 + Vector3.UP * 5
 		var ray := PhysicsRayQueryParameters3D.create(target, desired, 1, [rover.get_rid()])
@@ -171,6 +185,64 @@ func _physics_process(delta: float) -> void:
 				rover.drive_brake = true
 				notice = "Konwój czeka na drona — sprawdź przejazd za łazikiem"
 	label.text = ("LORRY  %.1f km/h\nW/S: napęd / wstecz • A/D: skręt • Spacja: hamulec\nE: wysiądź • L: światła • Esc: pauza\nDrony transportowe: %d\n%s" % [rover.linear_velocity.length() * 3.6, trucks.size(), notice]) if driving else ("E: wsiądź do Lorry" if actor.global_position.distance_to(rover.global_position) < 8 else "")
+
+	if driving:
+		var mode := " · PROWADZENIE" if road_following else ""
+		var p_hint := "P: sterowanie ręczne" if road_following else "P: prowadzenie po drodze"
+		label.text = "LORRY  %.1f km/h%s\nW/S: napęd / wstecz · A/D: skręt · Shift: 40 km/h · Spacja: hamulec\n%s · E: wysiądź · L: światła · Esc: pauza\nDrony transportowe: %d\n%s" % [rover.linear_velocity.length() * 3.6, mode, p_hint, trucks.size(), notice]
+
+func _drive_road_axis(suspended: bool) -> void:
+	if suspended:
+		rover.drive_throttle = 0.0
+		rover.drive_steer = 0.0
+		rover.drive_brake = true
+		return
+	var axis := _nearest_road_axis(rover.global_position)
+	if axis.is_empty():
+		rover.drive_throttle = 0.0
+		rover.drive_steer = 0.0
+		rover.drive_brake = true
+		notice = "Brak drogi w pobliżu"
+		return
+	var tangent: Vector3 = axis.tangent
+	var forward := -rover.global_basis.z
+	if forward.dot(tangent) < 0.0:
+		tangent = -tangent
+	var aim: Vector3 = axis.point + tangent * 12.0
+	var direction := aim - rover.global_position
+	direction.y = 0.0
+	if direction.length_squared() < 0.01:
+		return
+	var angle := forward.signed_angle_to(direction.normalized(), Vector3.UP)
+	var speed := rover.linear_velocity.dot(forward)
+	rover.drive_steer = clampf(angle * 1.8, -1.0, 1.0)
+	rover.drive_throttle = 1.0
+	rover.drive_brake = absf(angle) > 0.65 and speed > 3.0
+	notice = "Prowadzenie po osi drogi"
+
+func _nearest_road_axis(origin: Vector3) -> Dictionary:
+	if game == null or game.roads == null:
+		return {}
+	var nearest := {}
+	var closest_sq := INF
+	for segments: Array in game.roads.descriptors_by_tile.values():
+		for segment: Dictionary in segments:
+			var a: Vector3 = segment.a
+			var b: Vector3 = segment.b
+			var span := b - a
+			span.y = 0.0
+			var span_sq := span.length_squared()
+			if span_sq < 0.01:
+				continue
+			var flat_origin := Vector3(origin.x, a.y, origin.z)
+			var t := clampf((flat_origin - a).dot(span) / span_sq, 0.0, 1.0)
+			var point := a.lerp(b, t)
+			var delta := Vector2(origin.x - point.x, origin.z - point.z)
+			var distance_sq := delta.length_squared()
+			if distance_sq < closest_sq:
+				closest_sq = distance_sq
+				nearest = {"point": point, "tangent": span.normalized()}
+	return nearest
 
 func _follow(i: int, suspended: bool) -> void:
 	var truck := trucks[i]
