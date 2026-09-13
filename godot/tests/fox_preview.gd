@@ -31,7 +31,7 @@ func _run() -> void:
 	sun.light_energy = 1.6
 	world.add_child(sun)
 
-	var fox := (load("res://assets/colonies/tycho/modules/fox.glb") as PackedScene).instantiate() as Node3D
+	var fox := (load("res://assets/colonies/tycho/modules/foxy_model_Animation_Walking_withSkin.glb") as PackedScene).instantiate() as Node3D
 	world.add_child(fox)
 
 	var raw_box := _compute_box(fox)

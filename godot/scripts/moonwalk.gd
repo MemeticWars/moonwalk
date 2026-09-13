@@ -1113,7 +1113,7 @@ func _capture_globe() -> void:
 func _capture_fox() -> void:
 	theia.set_outline_style(0)
 	await get_tree().create_timer(1.0).timeout
-	var fox := (load("res://assets/colonies/tycho/modules/fox.glb") as PackedScene).instantiate() as Node3D
+	var fox := (load("res://assets/colonies/tycho/modules/foxy_model_Animation_Walking_withSkin.glb") as PackedScene).instantiate() as Node3D
 	surface.add_child(fox)
 	# Measure at scale=1/position=0 (bind pose; animation not played here --
 	# this capture only needs the static look, see _capture_fox_wander() for
@@ -1127,22 +1127,20 @@ func _capture_fox() -> void:
 		var b: AABB = m.global_transform * m.mesh.get_aabb()
 		box = b if not seeded else box.merge(b)
 		seeded = true
-	# There is no 100x skin-deformation factor -- that theory was wrong. The
-	# raw box is measured correctly; scaling straight to the target size and
-	# THEN re-measuring (below) is the only fix actually needed. box.size.z
-	# is confirmed (by comparing proportions against the source Blender mesh)
-	# to be the standing-height axis for this asset's bind-pose AABB -- scale
-	# off of it directly so the fox comes out ~30 cm tall, not off the
-	# diagonal (which mixes in body length and is a worse proxy for height).
-	var scale := 0.30 / maxf(box.size.z, 0.000000001)
+	# box is already world-space (transformed by m.global_transform above), so
+	# Y is unambiguously up -- this mirrors the fix in fox.gd's
+	# _scale_to_height(): .z was a horizontal (depth) extent, not height, and
+	# scaling off it oversized the fox and left a bogus near-zero foot offset.
+	# Target height matches fox.gd's TARGET_HEIGHT_M (0.40), not the old 0.30.
+	var scale := 0.40 / maxf(box.size.y, 0.000000001)
 	fox.scale = Vector3.ONE * scale
 	var spot := Vector3(_tycho_player_start().x + 4.0, 0, _tycho_player_start().z)
 	var ground := Vector3(spot.x, terrain.height_at(spot.x, spot.z), spot.z)
-	# box.position.z is the lowest point's offset from the model's own local
-	# origin (measured at scale=1) -- it's slightly positive (paws sit just
-	# above local (0,0,0)), so placing the origin at ground height alone
-	# leaves the paws hovering by that offset once scaled. Shift down by it.
-	ground.y -= box.position.z * scale
+	# box.position.y is the lowest point's offset from the model's own local
+	# origin (measured at scale=1) -- negative (paws sit below local (0,0,0)),
+	# so without this the paws hover above the ground by that offset once
+	# scaled up.
+	ground.y -= box.position.y * scale
 	fox.position = ground
 	await get_tree().process_frame
 	# Re-measure post-scale: the bind-pose box's tiny offset from the local

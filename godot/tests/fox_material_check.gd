@@ -1,7 +1,7 @@
 extends SceneTree
 
 func _initialize() -> void:
-	var fox := (load("res://assets/colonies/tycho/modules/fox.glb") as PackedScene).instantiate() as Node3D
+	var fox := (load("res://assets/colonies/tycho/modules/foxy_model_Animation_Walking_withSkin.glb") as PackedScene).instantiate() as Node3D
 	for m: MeshInstance3D in fox.find_children("*", "MeshInstance3D", true, false):
 		if m.mesh == null:
 			continue
@@ -15,7 +15,7 @@ func _initialize() -> void:
 				print("    albedo_color=", bm.albedo_color)
 				print("    shading_mode=", bm.shading_mode)
 			var arrays := m.mesh.surface_get_arrays(i)
-			var colors: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
+			var colors: PackedColorArray = arrays[Mesh.ARRAY_COLOR] if arrays[Mesh.ARRAY_COLOR] != null else PackedColorArray()
 			print("    color array size=", colors.size())
 			if colors.size() > 0:
 				var seen := {}

@@ -2,15 +2,15 @@ extends Node3D
 ## Wandering park NPC: walks between random points inside Tycho's west tree
 ## garden, pauses, and sometimes dips its head as if sniffing the ground.
 ## The walk clip ("Armature|Unreal Take|baselayer", the only animation in
-## fox.glb) has no NET root motion over a full loop -- position here is
+## foxy_model_Animation_Walking_withSkin.glb) has no NET root motion over a full loop -- position here is
 ## fully script-driven and the clip just plays in place. (The recolour
 ## pipeline separately rescales the clip's location fcurves by 0.01 to match
 ## the baked-down rest pose -- without that, playing the clip made the whole
 ## model visibly jump by up to ~1 m within a few frames.)
 
-const FOX_SCENE := preload("res://assets/colonies/tycho/modules/fox.glb")
+const FOX_SCENE := preload("res://assets/colonies/tycho/modules/foxy_model_Animation_Walking_withSkin.glb")
 const Site := preload("res://scripts/tycho_site.gd")
-const TARGET_HEIGHT_M := 0.30
+const TARGET_HEIGHT_M := 0.40
 const WALK_SPEED := 0.5  # m/s -- a small animal's ambling pace
 const ARRIVE_DIST := 0.2
 # World-space XZ box for the west tree garden (Site.CENTER + the _layout()
@@ -109,7 +109,7 @@ func _do_walk(delta: float) -> void:
 	position.x = here.x
 	position.z = here.y
 	position.y = terrain.height_at(here.x, here.y) - _foot_offset
-	# glTF/Godot convention: local -Z is forward.
+	# The foxy GLB faces local -Z in Godot; make that axis point to its target.
 	rotation.y = atan2(dir.x, dir.y) + PI
 
 func _enter_pause() -> void:
