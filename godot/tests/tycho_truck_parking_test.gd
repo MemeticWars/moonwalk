@@ -36,6 +36,12 @@ func run() -> void:
 	var apron_c := Vector3(-9, 0.0, -39) + Vector3(0.2239, 0.0, -0.9746).normalized() * 150.0 + Vector3(0.9746, 0.0, 0.2239).normalized() * 95.0
 	assert(Vector2(rocket.position.x, rocket.position.z).distance_to(Vector2(apron_c.x, apron_c.z)) < 0.01,
 		"Rocket must be centred on the octagonal landing apron")
+	var base := port.get_node_or_null("LogisticsBase") as Node3D
+	var hopper := port.get_node_or_null("CargoHopper") as Node3D
+	assert(base != null and hopper != null, "Cosmoport must create its base and hopper")
+	var hopper_deck := base.to_global(port.SECOND_LANDING_DECK_LOCAL)
+	assert(Vector2(hopper.position.x, hopper.position.z).distance_to(Vector2(hopper_deck.x, hopper_deck.z)) < 0.01,
+		"Hopper must occupy the second large circular deck on the cosmoport platform")
 	var truck := preload("res://scripts/lunar_truck.gd").new()
 	truck.terrain = terrain
 	root.add_child(truck)

@@ -2,15 +2,18 @@ extends Node3D
 ## Hopper landing field just outside the Tycho dome, beside the highway gate.
 ## Everything is in the city-pad local frame (origin at Site.CENTER, y = 0 at
 ## city_level); the caller positions the node. Mostly a short-range surface
-## delivery port -- one logistics-base building and two hopper pads -- plus
-## one InPost cargo lander hovering ten metres above the centre of the main
-## octagonal landing apron.
+## delivery port -- one logistics-base building with the hopper on its second
+## circular deck, two empty service pads, and one InPost cargo lander hovering
+## ten metres above the centre of the main octagonal landing apron.
 
 const BASE := "res://assets/colonies/tycho/modules/cosmoport.glb"
 const HOPPER := "res://assets/colonies/tycho/modules/delivery-hopper.glb"
 const ROCKET := "res://assets/colonies/tycho/modules/rocket_lunar_cargo_transport.glb"
 const ROCKET_HEIGHT_M := 22.0
 const ROCKET_GROUND_CLEARANCE_M := 10.0
+## Second large circular deck in cosmoport.glb's raw local frame. It mirrors
+## the former R1 deck at x=+0.45 and is the dedicated berth for the hopper.
+const SECOND_LANDING_DECK_LOCAL := Vector3(-0.45, -0.157, -0.02)
 ## Landing apron radius, in the same cosmoport-local frame as highway_origin --
 ## exposed so tycho_city.gd can grade a matching terrain pad for it (see
 ## _build_paths()'s gate/apron add_city_pad calls) before this node samples
@@ -111,6 +114,7 @@ func _ready() -> void:
 
 	# --- Logistics-base building on the far side of the apron, entrance to the ramp.
 	var base := _load_prop(BASE, false)
+	base.name = "LogisticsBase"
 	var raw := _bounds(base)
 	var bscale := 75.0 / maxf(raw.size.x, raw.size.z)
 	base.scale = Vector3.ONE * bscale
@@ -136,20 +140,24 @@ func _ready() -> void:
 	rocket.rotation.y = base.rotation.y
 	_body_box(rocket.position + Vector3.UP * (rraw.size.y * rscale * 0.5), Vector3(rraw.size.x * rscale + 0.4, rraw.size.y * rscale, rraw.size.z * rscale + 0.4), rocket.rotation.y)
 
-	# --- Two hopper pads on the highway side of the apron, each with a parked hopper.
+	# --- Two small hopper pads on the highway side remain clear as service bays.
 	for s: float in [-1.0, 1.0]:
 		var c: Vector3 = apron_c - hwy_side * 22.0 + hwy * (s * 20.0)
 		_pad_ring(c, 7.0, apron_top + 0.06, hazard, pad_mat)
 		for k in 6:
 			var a := TAU * float(k) / 6.0
 			_box(c + Vector3(cos(a), 0.0, sin(a)) * 6.2 + Vector3.UP * (apron_top + 0.35), Vector3(0.5, 0.7, 0.5), metal)
-		var hop := _load_prop(HOPPER, false)
-		var hb := _bounds(hop)
-		var hscale := 5.6 / maxf(hb.size.y, 0.001)
-		hop.scale = Vector3.ONE * hscale
-		hop.position = c + Vector3.UP * (apron_top - hb.position.y * hscale)
-		hop.rotation.y = s * 0.5
-		_body_box(hop.position + Vector3.UP * (hb.size.y * hscale * 0.45), Vector3(hb.size.x * hscale + 0.4, hb.size.y * hscale, hb.size.z * hscale + 0.4))
+
+	# --- Hopper on the base model's other large, circular landing deck.
+	var hop := _load_prop(HOPPER, false)
+	hop.name = "CargoHopper"
+	var hb := _bounds(hop)
+	var hscale := 5.6 / maxf(hb.size.y, 0.001)
+	hop.scale = Vector3.ONE * hscale
+	var hopper_deck := base.to_global(SECOND_LANDING_DECK_LOCAL)
+	hop.position = Vector3(hopper_deck.x, hopper_deck.y - hb.position.y * hscale, hopper_deck.z)
+	hop.rotation.y = base.rotation.y
+	_body_box(hop.position + Vector3.UP * (hb.size.y * hscale * 0.5), Vector3(hb.size.x * hscale + 0.4, hb.size.y * hscale, hb.size.z * hscale + 0.4), hop.rotation.y)
 
 	# --- Lighting: apron perimeter + off-ramp posts.
 	for k in 10:
