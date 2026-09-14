@@ -31,6 +31,20 @@ const BRIDGE_MAX_RUN := 320.0
 ## of every strategic road. It avoids creating thousands of physics panels.
 const FAR_LOD_REACH := 20000.0
 const FAR_LOD_STEP := 96.0
+## Every alignment corner (A* detours, switchback turnbacks, the far LOD
+## continuation) is rounded to a true tangent-arc curve instead of a jagged
+## polyline. The target radius is a highway-scale sweep; a corner only gets a
+## tighter arc than this when the waypoints on either side are too close
+## together to fit it -- exactly how a real switchback hairpin ends up much
+## tighter than the open road around it. The floor is not an aesthetic choice:
+## below it the deck's own width would make the inside and outside edges
+## cross, so a corner that cannot fit even that radius (a near-reversal with
+## short legs on both sides) is left as a hard vertex instead of a
+## self-intersecting arc. It scales with the actual road half-width, not a
+## fixed metre count, since that half-width is only known once the rover model
+## is measured at runtime (see lane_width in _ready).
+const CURVE_TARGET_RADIUS := 150.0
+const CURVE_MIN_RADIUS_FACTOR := 1.3
 ## Local sector-frame anchor for the colony's town square, not a geographic
 ## coordinate — every sector uses this same local origin.
 const SECTOR_ORIGIN := Vector2(-9, -14)
@@ -92,6 +106,16 @@ func _bake_sector_routes() -> void:
 	# follow actual initial great-circle bearings; distant colonies are never
 	# miniaturized here.
 	var origin := town_square_origin()
+	var local_route_count := 0
+	for route: Dictionary in world_routes:
+		if route.from == active_colony or route.to == active_colony:
+			local_route_count += 1
+	# A shared interchange only gets built (see highway_interchange.gd) when at
+	# least two of the colony's own routes meet here; only then does anything
+	# read a route's very first tangent/arc-length as a fixed hookup, so only
+	# then does the corner right after it need the lighter, protective
+	# rounding fraction (see _round_corners).
+	var protect_mouth := build_interchanges and local_route_count >= 2
 	for route: Dictionary in world_routes:
 		if route.from != active_colony and route.to != active_colony:
 			continue
@@ -123,7 +147,7 @@ func _bake_sector_routes() -> void:
 			"rails_gap": 25.0, "rails_gap_half": 55.0} if tycho else {}
 		if tycho:
 			lamp_min_station_by_route[route.id] = 85.0
-		_bake_route(route.id, _follow_safe_ground([start, goal]), 0.15, pin)
+		_bake_route(route.id, _follow_safe_ground([start, goal]), 0.15, pin, protect_mouth)
 
 func _route_endpoint(route_id: String) -> Vector3:
 	var result := Vector3.INF
@@ -177,21 +201,27 @@ func _build_far_lod() -> void:
 			for point: Vector2 in leg:
 				if alignment.back().distance_to(point) > 0.5:
 					alignment.append(point)
-		var far_curve := Curve3D.new()
-		far_curve.bake_interval = FAR_LOD_STEP
-		for point: Vector2 in alignment:
-			far_curve.add_point(Vector3(point.x, 0.0, point.y))
-		var far_length := far_curve.get_baked_length()
-		var count := maxi(1, ceili(far_length / FAR_LOD_STEP))
+		# Coarser arc steps here: this LOD is a distant, collision-free visual
+		# placeholder (see FAR_LOD_STEP), so it doesn't need the near field's
+		# fine tessellation -- just enough to read as a curve rather than a
+		# jagged zigzag from far away.
+		alignment = _round_corners(alignment, CURVE_TARGET_RADIUS, (lane_width + 0.4) * CURVE_MIN_RADIUS_FACTOR, 20.0)
+		# Subdivide each alignment leg to roughly FAR_LOD_STEP, but never merge
+		# past an alignment vertex: a uniform arc-length resample of the whole
+		# route (the previous approach) can step clean over a tight switchback
+		# arc when that arc's own length is shorter than FAR_LOD_STEP, turning a
+		# rounded hairpin back into a sharp elbow at this LOD's resolution.
+		var points2d: Array[Vector2] = [alignment[0]]
+		for i in range(1, alignment.size()):
+			var leg_a: Vector2 = alignment[i - 1]
+			var leg_b: Vector2 = alignment[i]
+			var pieces := maxi(1, ceili(leg_a.distance_to(leg_b) / FAR_LOD_STEP))
+			for p in range(1, pieces + 1):
+				points2d.append(leg_a.lerp(leg_b, float(p) / float(pieces)))
 		# Required visual height at each far station.
-		var points2d: Array[Vector2] = []
 		var heights := PackedFloat32Array([first.y])
-		for i in range(count + 1):
-			var sample := far_curve.sample_baked(far_length * float(i) / float(count))
-			var point_2d := Vector2(sample.x, sample.z)
-			points2d.append(point_2d)
-			if i == 0:
-				continue
+		for i in range(1, points2d.size()):
+			var point_2d: Vector2 = points2d[i]
 			# At long-distance LOD the terrain and road are both visual-only. Use
 			# the centreline datum so cross-slope cannot lift the entire ribbon;
 			# detailed shoulder cuts are created when this region becomes local.
@@ -297,6 +327,61 @@ func _plan_ground_leg(start: Vector2, goal: Vector2) -> Array[Vector2]:
 		path[path.size() - 1] = goal
 	return path
 
+## Replaces every interior vertex of an alignment with a true tangent circular
+## arc (the same construction real road curves use), instead of the polyline's
+## sharp corner. The arc radius is `radius`, shrunk only as far as the two
+## adjacent legs allow (never past half of either, so neighbouring arcs never
+## overlap); a vertex whose room shrinks it below `floor_radius` is left as a
+## hard corner rather than rounded into a self-crossing curve.
+static func _round_corners(points: Array[Vector2], radius: float, floor_radius: float, arc_step_deg: float = 6.0, protect_mouth: bool = false) -> Array[Vector2]:
+	if points.size() < 3:
+		return points.duplicate()
+	var result: Array[Vector2] = [points[0]]
+	for i in range(1, points.size() - 1):
+		var a: Vector2 = points[i - 1]
+		var b: Vector2 = points[i]
+		var c: Vector2 = points[i + 1]
+		var seg_in := a.distance_to(b)
+		var seg_out := b.distance_to(c)
+		if seg_in < 0.01 or seg_out < 0.01:
+			continue
+		var u := (b - a) / seg_in
+		var v := (c - b) / seg_out
+		var turn := u.angle_to(v)
+		if absf(turn) < 0.005:
+			result.append(b)
+			continue
+		var half := absf(turn) * 0.5
+		# When an interchange actually attaches here, the leg touching points[0]
+		# or the final point is a fixed hookup it reads directly (the ramp's
+		# matched tangent and arc-length): only lightly round it, rather than
+		# the usual ~half its length, so this pass cannot swing that hookup far
+		# enough to blow the interchange's own separately-tuned grade limit.
+		# Single-route colonies (no interchange, e.g. Tycho) skip this --
+		# nothing reads that corner as a hookup, so it gets the same full
+		# rounding as every other bend.
+		var frac_in := 0.15 if protect_mouth and i == 1 else 0.49
+		var frac_out := 0.15 if protect_mouth and i == points.size() - 2 else 0.49
+		var max_l := minf(seg_in * frac_in, seg_out * frac_out)
+		var l := minf(radius * tan(half), max_l)
+		var actual_radius := l / tan(half)
+		if actual_radius < floor_radius:
+			result.append(b)
+			continue
+		var t1 := b - u * l
+		var t2 := b + v * l
+		var perp := u.rotated(signf(turn) * PI * 0.5)
+		var center := t1 + perp * actual_radius
+		var start_vec := t1 - center
+		var steps := clampi(int(ceil(absf(turn) / deg_to_rad(arc_step_deg))), 1, 28)
+		result.append(t1)
+		for s in range(1, steps):
+			var ang := turn * float(s) / float(steps)
+			result.append(center + start_vec.rotated(ang))
+		result.append(t2)
+	result.append(points.back())
+	return result
+
 func _switchback_waypoints(start: Vector2, goal: Vector2) -> Array[Vector2]:
 	var direct_distance := start.distance_to(goal)
 	if direct_distance < 1.0:
@@ -359,17 +444,12 @@ func _same_heading(a: Vector2, b: Vector2, c: Vector2) -> bool:
 	var second := (c - b).normalized()
 	return first.dot(second) > 0.999
 
-func _bake_route(route_id: String, points: Array[Vector2], surface_offset: float, ground_pin: Dictionary = {}) -> void:
+func _bake_route(route_id: String, points: Array[Vector2], surface_offset: float, ground_pin: Dictionary = {}, protect_mouth: bool = false) -> void:
 	if terrain == null or points.size() < 2:
 		return
-	# Rounded horizontal alignment, preserving the connection endpoints.
-	for iteration in 4:
-		var rounded: Array[Vector2] = [points[0]]
-		for i in range(points.size() - 1):
-			rounded.append(points[i].lerp(points[i + 1], 0.25))
-			rounded.append(points[i].lerp(points[i + 1], 0.75))
-		rounded.append(points.back())
-		points = rounded
+	# Rounded horizontal alignment: every corner becomes a true tangent arc
+	# (see _round_corners), not a relaxed-but-still-faceted polyline.
+	points = _round_corners(points, CURVE_TARGET_RADIUS, (lane_width + 0.4) * CURVE_MIN_RADIUS_FACTOR, 6.0, protect_mouth)
 	var curve := Curve3D.new()
 	curve.bake_interval = SAMPLE_STEP
 	for p in points:
@@ -377,30 +457,6 @@ func _bake_route(route_id: String, points: Array[Vector2], surface_offset: float
 	var samples := PackedVector3Array()
 	var length := curve.get_baked_length()
 	var count := maxi(2, ceili(length / SAMPLE_STEP))
-	for i in range(count + 1):
-		samples.append(curve.sample_baked(length * float(i) / count))
-	# A wide lorry road cannot inherit tight grid-scale bends: relax curvature
-	# until the inside edge has ample radius and cannot fold over itself.
-	var minimum_radius := lane_width * 6.0
-	for iteration in 600:
-		var worst := 0.0
-		for i in range(1, samples.size() - 1):
-			var incoming := samples[i] - samples[i - 1]
-			var outgoing := samples[i + 1] - samples[i]
-			worst = maxf(worst, incoming.normalized().angle_to(outgoing.normalized()) / maxf(0.01, (incoming.length() + outgoing.length()) * 0.5))
-		if worst <= 1.0 / minimum_radius:
-			break
-		var relaxed := samples.duplicate()
-		for i in range(1, samples.size() - 1):
-			relaxed[i] = samples[i] * 0.5 + (samples[i - 1] + samples[i + 1]) * 0.25
-		samples = relaxed
-	# Restore uniform arc-length sampling after smoothing.
-	curve.clear_points()
-	for p in samples:
-		curve.add_point(p)
-	length = curve.get_baked_length()
-	count = maxi(2, ceili(length / SAMPLE_STEP))
-	samples.clear()
 	for i in range(count + 1):
 		samples.append(curve.sample_baked(length * float(i) / count))
 	var rights := PackedVector3Array()

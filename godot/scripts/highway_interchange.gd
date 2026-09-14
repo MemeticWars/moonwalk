@@ -37,22 +37,36 @@ static func build(roads: Node) -> void:
 		var arrival := -axis * sign_value
 		var handle := start.distance_to(target) * 0.45
 		var points := PackedVector3Array()
-		var count := maxi(40, ceili(start.distance_to(target) / 2.0))
-		for j in range(count + 1):
-			var t := float(j) / count
-			points.append(start.bezier_interpolate(start + tangent * handle, target - arrival * handle, target, t))
-		# Use arc length for the vertical Hermite profile: Bezier parameter speed
-		# must not turn a gentle height change into a steep short segment.
-		var stations := PackedFloat32Array([0.0])
-		for j in range(1, points.size()):
-			stations.append(stations[-1] + Vector2(points[j].x - points[j - 1].x, points[j].z - points[j - 1].z).length())
-		var total := stations[-1]
+		var stations := PackedFloat32Array()
+		var total := 0.0
+		# The main road now stays near its own terrain rather than a fixed pad
+		# level, so the two mouths can arrive at noticeably different heights
+		# from one call to the next. A fixed handle length would then sometimes
+		# give the link too little arc length to cover that rise within
+		# MAX_GRADE; bow the curve out further (more handle, same tangent and
+		# endpoints) until its own arc length can hold the grade, the same way
+		# a real ramp gets lengthened rather than built steeper.
+		for attempt in 8:
+			points = PackedVector3Array()
+			var count := maxi(40, ceili(start.distance_to(target) / 2.0))
+			for j in range(count + 1):
+				var t := float(j) / count
+				points.append(start.bezier_interpolate(start + tangent * handle, target - arrival * handle, target, t))
+			# Use arc length for the vertical Hermite profile: Bezier parameter
+			# speed must not turn a gentle height change into a steep short
+			# segment.
+			stations = PackedFloat32Array([0.0])
+			for j in range(1, points.size()):
+				stations.append(stations[-1] + Vector2(points[j].x - points[j - 1].x, points[j].z - points[j - 1].z).length())
+			total = stations[-1]
+			if total >= absf(target.y - start.y) / (roads.MAX_GRADE * 0.85):
+				break
+			handle *= 1.4
 		for j in points.size():
 			var t := stations[j] / total
-			# The main road now stays near its own terrain, so the two mouths can
-			# start at noticeably different levels. A constant arc-length grade
-			# avoids the Hermite overshoot that used to push these short links over
-			# the same 6% limit enforced on the highways.
+			# A constant arc-length grade avoids the Hermite overshoot that used
+			# to push these short links over the same 6% limit enforced on the
+			# highways.
 			points[j].y = lerpf(start.y, target.y, t)
 		var id := prefix + "-link-%d" % i
 		ribbon(roads, id, points, width, -mouth.ra, arrival.cross(Vector3.UP), mouth.na, Vector3.UP, "connector")
