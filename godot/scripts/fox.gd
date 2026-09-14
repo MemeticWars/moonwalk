@@ -41,34 +41,39 @@ func _ready() -> void:
 			_tree_centers.append(Vector2(Site.CENTER.x + x, Site.CENTER.y + z))
 	_body = FOX_SCENE.instantiate()
 	add_child(_body)
-	_scale_to_height()
 	_anim = _body.find_children("*", "AnimationPlayer", true, false)[0]
 	_skeleton = _body.find_children("*", "Skeleton3D", true, false)[0]
 	_head_bone = _skeleton.find_bone("head")
+	_scale_to_height()
 	var start := _random_park_point()
 	position = Vector3(start.x, terrain.height_at(start.x, start.y) - _foot_offset, start.y)
 	_pick_new_target()
 
 func _scale_to_height() -> void:
+	# mesh.get_aabb() on this GLB's skinned mesh is NOT a measurement of the
+	# fox at all: confirmed by instrumenting this function, it returns a
+	# degenerate ~5e-5 m box on every axis (bind-pose data collapsed near the
+	# origin, unrelated to which axis is "up"). A prior fix here swapped
+	# box.size.z for box.size.y believing it was an axis mixup; both numbers
+	# were equally meaningless, which is why the fox stayed wrong after that
+	# fix -- the scale it produced (~7273x) just happened to look plausible.
+	# The Skeleton3D's bone rest pose IS correctly scaled (see
+	# probe_foxy.log / [[fox-park-npc]]), so measure real size from bone
+	# positions instead of the mesh's cached AABB.
 	var box := AABB()
 	var seeded := false
-	for m: MeshInstance3D in _body.find_children("*", "MeshInstance3D", true, false):
-		if m.mesh == null: continue
-		var b: AABB = m.global_transform * m.mesh.get_aabb()
+	for i in _skeleton.get_bone_count():
+		var p: Vector3 = _skeleton.global_transform * _skeleton.get_bone_global_pose(i).origin
+		var b := AABB(p, Vector3.ZERO)
 		box = b if not seeded else box.merge(b)
 		seeded = true
-	# box is already world-space (transformed by m.global_transform above), so
-	# Y is unambiguously up -- .z was a leftover from the old fox.glb's own
-	# axis convention and silently measured a horizontal (depth) extent
-	# instead of height, undershooting the divisor and oversizing the fox
-	# ~1.7x (plus a bogus near-zero foot offset instead of the true negative
-	# one, sinking the paws into the ground).
 	var scale := TARGET_HEIGHT_M / maxf(box.size.y, 0.000000001)
 	_body.scale = Vector3.ONE * scale
-	# box.position.y is the lowest point's offset from the model's own local
-	# origin (measured at scale=1) -- negative (paws sit below local (0,0,0)),
-	# so without this the paws hover above the ground by that offset once
-	# scaled up.
+	# box.position.y is the lowest bone's offset from the model's own local
+	# origin (measured at scale=1); without this the paws would hover/sink by
+	# that offset once scaled up. Bone positions undershoot the true paw
+	# contact point slightly (no bone sits exactly at the ground), so this is
+	# an approximation, not exact -- acceptable for a small background NPC.
 	_foot_offset = box.position.y * scale
 
 func _clear_of_trees(x: float, z: float) -> bool:
@@ -109,8 +114,10 @@ func _do_walk(delta: float) -> void:
 	position.x = here.x
 	position.z = here.y
 	position.y = terrain.height_at(here.x, here.y) - _foot_offset
-	# The foxy GLB faces local -Z in Godot; make that axis point to its target.
-	rotation.y = atan2(dir.x, dir.y) + PI
+	# The foxy GLB faces local +Z in Godot (verified empirically: with the old
+	# "+PI" here, a chase camera placed behind the direction of travel saw the
+	# fox's face, not its back -- it was walking backwards). No +PI needed.
+	rotation.y = atan2(dir.x, dir.y)
 
 func _enter_pause() -> void:
 	_state = "pause"

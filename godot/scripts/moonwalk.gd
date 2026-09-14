@@ -1137,20 +1137,22 @@ func _capture_fox() -> void:
 	surface.add_child(fox)
 	# Measure at scale=1/position=0 (bind pose; animation not played here --
 	# this capture only needs the static look, see _capture_fox_wander() for
-	# the animated/in-park view), then rescale and recentre around the AABB's
+	# the animated/in-park view), then rescale and recentre around the box's
 	# centre rather than its corner so the result doesn't depend on where the
 	# model's pivot happens to sit.
+	# mesh.get_aabb() is NOT usable here: this GLB's skinned mesh reports a
+	# degenerate ~5e-5 m bind-pose box on every axis, regardless of axis
+	# choice -- see the matching fix and measurement in fox.gd's
+	# _scale_to_height(). Measure from the Skeleton3D's bone rest positions
+	# instead, mirroring that fix so this preview matches the real NPC.
+	var skeleton: Skeleton3D = fox.find_children("*", "Skeleton3D", true, false)[0]
 	var box := AABB()
 	var seeded := false
-	for m: MeshInstance3D in fox.find_children("*", "MeshInstance3D", true, false):
-		if m.mesh == null: continue
-		var b: AABB = m.global_transform * m.mesh.get_aabb()
+	for i in skeleton.get_bone_count():
+		var p: Vector3 = skeleton.global_transform * skeleton.get_bone_global_pose(i).origin
+		var b := AABB(p, Vector3.ZERO)
 		box = b if not seeded else box.merge(b)
 		seeded = true
-	# box is already world-space (transformed by m.global_transform above), so
-	# Y is unambiguously up -- this mirrors the fix in fox.gd's
-	# _scale_to_height(): .z was a horizontal (depth) extent, not height, and
-	# scaling off it oversized the fox and left a bogus near-zero foot offset.
 	# Target height matches fox.gd's TARGET_HEIGHT_M (0.40), not the old 0.30.
 	var scale := 0.40 / maxf(box.size.y, 0.000000001)
 	fox.scale = Vector3.ONE * scale
@@ -1167,11 +1169,13 @@ func _capture_fox() -> void:
 	# origin gets amplified by `scale` right along with its size, so the
 	# model's true centre can land far from `fox.position` -- frame the
 	# camera on the freshly measured box, not a fixed offset from `ground`.
+	# Same skeleton-based measurement as above; mesh.get_aabb() would still
+	# be the degenerate bind-pose box here.
 	var scaled_box := AABB()
 	seeded = false
-	for m: MeshInstance3D in fox.find_children("*", "MeshInstance3D", true, false):
-		if m.mesh == null: continue
-		var b: AABB = m.global_transform * m.mesh.get_aabb()
+	for i in skeleton.get_bone_count():
+		var p: Vector3 = skeleton.global_transform * skeleton.get_bone_global_pose(i).origin
+		var b := AABB(p, Vector3.ZERO)
 		scaled_box = b if not seeded else scaled_box.merge(b)
 		seeded = true
 	var center: Vector3 = scaled_box.position + scaled_box.size * 0.5

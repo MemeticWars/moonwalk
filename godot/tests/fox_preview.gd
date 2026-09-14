@@ -36,15 +36,32 @@ func _run() -> void:
 
 	var raw_box := _compute_box(fox)
 	print("RAW BOX pos=", raw_box.position, " size=", raw_box.size)
-	var scale := 0.55 / maxf(raw_box.size.length(), 0.0001)
+	# raw_box is useless here: this GLB's skinned mesh reports a degenerate
+	# ~5e-5 m bind-pose AABB on every axis (confirmed via DEBUG_FOX prints in
+	# fox.gd, not an axis mixup -- box.size.length() is just as meaningless as
+	# any single component). Measure real size from the Skeleton3D's bone
+	# rest positions instead, matching fox.gd's _scale_to_height().
+	var skeleton: Skeleton3D = fox.find_children("*", "Skeleton3D", true, false)[0]
+	var bone_box := AABB()
+	var bone_seeded := false
+	for i in skeleton.get_bone_count():
+		var p: Vector3 = skeleton.global_transform * skeleton.get_bone_global_pose(i).origin
+		var b := AABB(p, Vector3.ZERO)
+		bone_box = b if not bone_seeded else bone_box.merge(b)
+		bone_seeded = true
+	var scale := 0.40 / maxf(bone_box.size.y, 0.000000001)
 	fox.scale = Vector3.ONE * scale
 
-	# The bind-pose AABB is a sub-millimetre sliver offset from the local
-	# origin; scaling the model up by ~1e5-1e6x amplifies that tiny offset
-	# into a multi-metre world-space displacement. Recompute the box AFTER
-	# scaling and frame the camera on ITS centre, not a fixed point.
+	# Recompute AFTER scaling (bone positions, not _compute_box's mesh AABB --
+	# see above) and frame the camera on ITS centre, not a fixed point.
 	await process_frame
-	var scaled_box := _compute_box(fox)
+	var scaled_box := AABB()
+	bone_seeded = false
+	for i in skeleton.get_bone_count():
+		var p: Vector3 = skeleton.global_transform * skeleton.get_bone_global_pose(i).origin
+		var b := AABB(p, Vector3.ZERO)
+		scaled_box = b if not bone_seeded else scaled_box.merge(b)
+		bone_seeded = true
 	print("SCALED BOX pos=", scaled_box.position, " size=", scaled_box.size)
 	var center: Vector3 = scaled_box.position + scaled_box.size * 0.5
 	var radius: float = maxf(scaled_box.size.length(), 0.2)
