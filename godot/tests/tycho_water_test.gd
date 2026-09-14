@@ -111,14 +111,34 @@ func run() -> void:
 	water.terrain = terrain
 	root.add_child(water)
 	water.set_process(false)
+	var water_material: ShaderMaterial = water._make_water_material()
+	check(absf(float(water_material.get_shader_parameter("coverage_shallow")) - 0.56) < 0.001, "Shallow water exposes the bed through opaque-pass dithering")
+	check(absf(float(water_material.get_shader_parameter("coverage_deep")) - 0.80) < 0.001, "Deep water retains stronger coloured coverage")
 	var material := ShaderMaterial.new()
 	water._add_pond(Layout.POND1_CENTER,Layout.POND1_RADII,material)
 	water._add_stream(material)
-	for node: MeshInstance3D in water.get_children():
+	for child in water.get_children():
+		if not child is MeshInstance3D:
+			continue
+		var node := child as MeshInstance3D
 		var normals: PackedVector3Array = node.mesh.surface_get_arrays(0)[Mesh.ARRAY_NORMAL]
 		check(normals[0].y > 0.9, "Water faces upward: " + str(node.name))
 		check(absf(node.position.y-9.875)<0.001, "Ponds and brook must share the water level lowered by 10 cm")
 	water.free()
+	var fish := preload("res://scripts/pond_fish.gd").new()
+	fish.center = Layout.POND1_CENTER
+	fish.radii = Layout.POND1_RADII * 0.6
+	fish.water_y = 9.6
+	root.add_child(fish)
+	var fish_meshes: Array[Node] = fish.find_children("*", "MeshInstance3D", true, false)
+	check(not fish_meshes.is_empty(), "Fish visual is present")
+	if not fish_meshes.is_empty():
+		var animated_material := (fish_meshes[0] as MeshInstance3D).get_active_material(0)
+		check(animated_material is ShaderMaterial and (animated_material as ShaderMaterial).shader == preload("res://shaders/pond_fish.gdshader"), "Fish uses its tail-stroke animation shader")
+	var before := fish.position
+	fish._process(0.25)
+	check(fish.position.distance_to(before) > 0.01, "Fish controller advances along its route")
+	fish.free()
 	# Verify all fine/coarse cell transitions along the curved route.
 	for p: Vector2 in route:
 		var x := floorf(p.x/2)*2
@@ -142,5 +162,5 @@ func run() -> void:
 		for p: Vector2 in route:
 			check(absf(real_terrain.raw_height(p.x,p.y) - (real_terrain.city_level-Layout.depth(p))) < 0.03, "Real terrain ridge must not obstruct the brook")
 		real_terrain.free()
-	print("TYCHO WATER: %d failures; depths, U section, building clearance, rounded route, bed collision, water mesh" % failures)
+	print("TYCHO WATER: %d failures; depths, U section, building clearance, rounded route, bed collision, clear water, animated fish" % failures)
 	quit(1 if failures else 0)

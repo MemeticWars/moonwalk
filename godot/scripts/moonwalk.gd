@@ -103,6 +103,8 @@ func _ready() -> void:
 		_capture_fox.call_deferred()
 	if "--capture-fox-wander" in OS.get_cmdline_user_args():
 		_capture_fox_wander.call_deferred()
+	if "--capture-water" in OS.get_cmdline_user_args():
+		_capture_water.call_deferred()
 	if "--capture-rain-outline" in OS.get_cmdline_user_args():
 		_capture_rain_outline.call_deferred()
 	if "--capture-run-jump" in OS.get_cmdline_user_args():
@@ -1194,6 +1196,33 @@ func _capture_fox_wander() -> void:
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png("res://../artifacts/fox_wander_%d.png" % i)
 		cam.queue_free()
+	get_tree().quit()
+
+func _capture_water() -> void:
+	theia.set_outline_style(0)
+	# D1 pond is TychoWaterFeature's first "Pond" child (built once the east
+	# annex has graded m2/m3's pad -- see tycho_city.gd/tycho_water_feature.gd).
+	await get_tree().create_timer(3.0).timeout
+	var found := surface.find_children("TychoWaterFeature", "", true, false)
+	if found.is_empty():
+		push_error("TychoWaterFeature not built yet -- too far from player start, or annex pad ungraded?")
+		get_tree().quit()
+		return
+	var pond: Node3D = (found[0] as Node3D).get_node_or_null("Pond")
+	if pond == null:
+		push_error("Pond mesh not found under TychoWaterFeature")
+		get_tree().quit()
+		return
+	# Eye-height view from the bank, as if Agnes were walking past.
+	var center: Vector3 = pond.position
+	var cam := Camera3D.new()
+	surface.add_child(cam)
+	cam.position = center + Vector3(-6.0, 1.75, -1.0)
+	cam.look_at(center + Vector3(0.5, -0.1, 1.5))
+	cam.make_current()
+	await get_tree().create_timer(1.0).timeout
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png("res://../artifacts/water_ingame.png")
 	get_tree().quit()
 
 func _capture_rain_outline() -> void:

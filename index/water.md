@@ -10,6 +10,54 @@ Alejkę serwisową na x=-30, z=-11 przecina mostek z własną kolizją. W tunelu
 
 `tycho_city.gd` dopasowuje siatkę trawnika do niecki i zostawia pas bez źdźbeł wzdłuż zaokrąglonej trasy. `tycho_water_feature.gd` tworzy osobne, poziome powierzchnie wody z istniejącym shaderem widocznym z efektem obrysu. Ryby pływają tylko w stawach, poniżej lustra; poprzedni ruch po wydłużonych elipsach nie mieścił się w nowym, wąskim korycie.
 
-Materiał wody ma przygaszony szarozielony kolor i ciemny odcień przy kątach stycznych, zamiast jasnego turkusu sugerującego niebieskie niebo. To dobór wizualny dla płytkich niecek pod kopułą, a nie symulacja optyczna: [czysta woda ma własny delikatny niebieski odcień](https://www.usgs.gov/water-science-school/science/water-color), więc czarne niebo nie oznacza automatycznie czarnej wody. Odbłyski nadal zależą od oświetlenia sceny.
+## Kolor, fale i kształt powierzchni (2026-09-13)
+
+Poprzedni przygaszony szarozielony materiał (uzasadniany tym, że czysta woda
+ma i tak własny delikatny niebieski odcień, więc czarne niebo nie musi dawać
+czarnej wody) na żywo pod czarnym niebem kopuły wyglądał po prostu na czarny,
+nie niebieskawy — zmieniony na wyraźny gradient głębi po zgłoszeniu przez
+użytkownika. `color_deep`/`color_shallow` w `water.gdshader` nie czytają już
+tekstury głębi (ten odczyt jest i pozostaje zablokowany, patrz niżej) — są
+teraz mieszane wagą zapisaną w kolorze wierzchołka (`COLOR.r`, 1.0 = środek
+stawu, 0.0 = brzeg stawu i cały, jednostajnie płytki potok), nadawaną w
+`tycho_water_feature.gd::_add_pond()/_add_stream()`. `albedo_fresnel` (kolor
+pod kątem stycznym, czyli to, co czyta się jako "niebo odbite w wodzie")
+rozjaśniony z prawie czarnego na jasny niebieskoszary, a `roughness`
+podniesiony (0.10→0.30), żeby zamiast ostrego czarnego lustra nieba było
+miękkie, jasne połyskiwanie.
+
+Powierzchnia stawu (`_add_pond`) nie jest już pojedynczym wachlarzem
+trójkątów od jednego wspólnego wierzchołka środkowego do obwodu — przy takiej
+siatce przesunięcie fal w vertex shaderze poruszało tym jednym środkowym
+wierzchołkiem względem obwodu i dawało płasko cieniowane, trójkątne "języki"
+wody rozchodzące się od środka, z postrzępionym (nie gładko owalnym)
+brzegiem. Teraz to 6 współśrodkowych pierścieni (nadal elipsa `radii.x/y`,
+kształt owalny nie zmienił się, po prostu wcześniej fale go maskowały).
+`WaveSteepnesses`/`WaveAmplitudes` w `tycho_water_feature.gd::_make_water_material()`
+zmniejszone ~6x — poprzednie 0,25 m bezpośredniego przesunięcia pionowego
+(patrz `P_DEG()` w shaderze: `result.y = Steepness * sin(...)`) było
+nieproporcjonalne do stawu o promieniu 3-4,5 m.
+
+Odczyt tekstury głębi/ekranu (REFRACTION/DEPTH_FOG/SHORE_FOAM w
+`water.gdshader`) pozostaje **celowo wyłączony** — patrz komentarz na
+początku pliku shadera: dowolny materiał deklarujący `hint_screen_texture`/
+`hint_depth_texture` jest wymazywany przez efekt obrysu (K), więc prawdziwa
+przezroczystość alpha/refrakcja nie jest tu dostępna bez ponownego złamania
+obrysu. Przejrzystość jest dlatego realizowana metodą screen-door w
+nieprzezroczystym przebiegu: stabilny wzór odrzuca 44% próbek płytkiej wody
+i 20% próbek nad głębią, naprawdę odsłaniając dno i ryby między zachowanymi
+próbkami z falami i refleksami. Brzeg i cały płytki potok są dodatkowo
+jaśniejsze (`color_shallow`), a środek stawu zachowuje głębszy błękit.
+
+Ryby korzystają z `pond_fish.gdshader`, ponieważ źródłowy GLB jest jedną
+siatką bez szkieletu i klipów. Shader prowadzi falę wzdłuż ciała i zwiększa
+jej amplitudę na ogonie, natomiast `pond_fish.gd` dodaje niezależne fazy,
+kołysanie, pochylenie na zakrętach, bobbing oraz krótkie przyspieszenie po
+wybraniu nowego celu. Model jest też ustawiany głową (lokalne `-X`) zgodnie
+z rzeczywistym kierunkiem ruchu.
+
+Podgląd bez pełnej nawigacji: `--capture-water --agent-run` (flaga w
+`moonwalk.gd::_capture_water()`, wzorowana na `--capture-fox`) łapie staw D1
+z poziomu oczu, tak jak zobaczy go Agnes idąc obok.
 
 Test: `Godot --headless --path godot --log-file <plik> --script res://tests/tycho_water_test.gd -- --real-dem`. Obejmuje głębokości, przekrój U, prześwity względem rzeczywistych wymiarów modułów, łagodne zakręty, zgodność raycastu kolizji z `height_at()`, obniżony trawnik, orientację powierzchni wody, osobną uliczkę z kolizją przez tunel i brak grzbietu na rzeczywistym DEM Tycho. Przed uruchomieniem stosuj rejestr aktywnej pracy i zasady z `index/collaboration.md`.

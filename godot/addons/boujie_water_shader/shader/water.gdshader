@@ -41,6 +41,11 @@ uniform sampler2D texture_albedo: source_color;
 uniform float specular : hint_range(0.0, 1.0) = 0.5;
 uniform float roughness : hint_range(0.0, 1.0) = 0.2;
 uniform float metallic : hint_range(0.0, 1.0) = 0.0;
+// Opaque-pass screen-door transparency. Discarded samples reveal the real
+// excavated bed and fish without moving this material into Godot's transparent
+// pass (which the project's full-screen outline cannot composite correctly).
+uniform float coverage_shallow : hint_range(0.0, 1.0) = 0.58;
+uniform float coverage_deep : hint_range(0.0, 1.0) = 0.84;
 
 /* When ON - vertex waves rise along the mesh's normal
  * When OFF - vertex waves rise in the global up direction (+y)
@@ -404,11 +409,25 @@ void fragment() {
 #endif
 
 	float final_refraction_opacity = refraction_opacity;
+	// Moonwalk fork: depth isn't read from the (disabled, see top-of-file
+	// comment) depth texture -- it's baked into vertex COLOR.r when the pond/
+	// stream mesh is built (1.0 at a pond's centre, 0.0 at its rim and along
+	// the uniformly-shallow stream), reusing color_deep/color_shallow as a
+	// geometric depth gradient instead of a screen-space one.
+	vec4 depth_tint = mix(color_shallow, color_deep, COLOR.r);
+	// Interleaved-gradient dithering behaves like stable screen-door glass:
+	// uncovered pixels show the actual scene below, while covered pixels retain
+	// waves, highlights and depth. It intentionally does not assign ALPHA.
+	float coverage = mix(coverage_shallow, coverage_deep, COLOR.r);
+	float dither = fract(52.9829189 * fract(dot(floor(FRAGCOORD.xy), vec2(0.06711056, 0.00583715))));
+	if (dither > coverage) {
+		discard;
+	}
 #ifdef FRESNEL
 	float fresnel_factor = fresnel(3.0, NORMAL, VIEW);
-	vec4 surface_color = mix(albedo, albedo_fresnel, fresnel_factor);
+	vec4 surface_color = mix(depth_tint, albedo_fresnel, fresnel_factor);
 #else
-	vec4 surface_color = albedo;
+	vec4 surface_color = depth_tint;
 #endif
 
 #ifdef SNELLS_WINDOW
