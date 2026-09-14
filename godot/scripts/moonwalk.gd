@@ -10,6 +10,9 @@ const Lorry = preload("res://scripts/lunar_lorry.gd")
 const RoadStreamer = preload("res://scripts/road_streamer.gd")
 const LunarHorizon = preload("res://scripts/lunar_horizon.gd")
 const TychoSite = preload("res://scripts/tycho_site.gd")
+const SunHorizon = preload("res://scripts/sun_horizon.gd")
+const SUN_ENERGY_DAY := 1.65
+const SUN_HORIZON_CHECK_INTERVAL := 0.4
 const LUBIN_DEEP_PLAYER_START := Vector3(-5.0, 0.0, -10.0)
 const TYCHO_GATE_DIR := Vector2(0.0, -1.0)
 const TYCHO_HIGHWAY_DIR := Vector2(0.2239, -0.9746)
@@ -50,6 +53,10 @@ var controls_note: Label
 var autopilot_button: Button
 var lunar_sky: Node
 var planet_sun_direction := Vector3.ZERO
+## Whole-Moon horizon occlusion of the sun at theia's current position --
+## distinct from the shadow map, which only sees the locally loaded terrain.
+var sun_occluded := false
+var sun_horizon_cooldown := 0.0
 var sky_phase_slider: HSlider
 # Godot's MovieWriter can only be armed at engine start (--write-movie) and is
 # finalised on a clean quit. So "start recording" relaunches the game into a
@@ -427,7 +434,7 @@ func _setup_light() -> void:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-18, -42, 0)
 	sun.light_color = Color(1, 0.96, 0.88)
-	sun.light_energy = 1.65
+	sun.light_energy = SUN_ENERGY_DAY
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = 50000.0
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
@@ -738,10 +745,11 @@ func _camera_changed(index: int) -> void:
 	else:
 		camera_info.text += "\nMysz obraca postać i kierunek patrzenia."
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not is_instance_valid(theia):
 		return
 	_update_terrain_shadows()
+	_update_sun_horizon(delta)
 	if landing_busy and globe.approach:
 		var altitude := maxf(0.0,get_viewport().get_camera_3d().global_position.y-theia.position.y)
 		status.text = "Podejście do lądowania\nWysokość nad celem: %.0f m" % altitude
@@ -959,6 +967,16 @@ func _update_terrain_shadows() -> void:
 		sun.directional_shadow_split_2 = lerpf(0.02,0.25,high)
 		sun.directional_shadow_split_3 = lerpf(0.16,0.55,high)
 		sun.shadow_normal_bias = 1.0
+
+func _update_sun_horizon(delta: float) -> void:
+	if map_mode or planet_sun_direction == Vector3.ZERO:
+		return
+	sun_horizon_cooldown -= delta
+	if sun_horizon_cooldown > 0.0:
+		return
+	sun_horizon_cooldown = SUN_HORIZON_CHECK_INTERVAL
+	sun_occluded = not SunHorizon.is_visible(terrain, theia.position, planet_sun_direction)
+	lunar_sky.sun.light_energy = 0.0 if sun_occluded else SUN_ENERGY_DAY
 
 func _landing_destination(coordinates: Vector2) -> Dictionary:
 	var radial := Vector3(cos(deg_to_rad(coordinates.x)) * sin(deg_to_rad(coordinates.y)), sin(deg_to_rad(coordinates.x)), cos(deg_to_rad(coordinates.x)) * cos(deg_to_rad(coordinates.y)))
