@@ -19,6 +19,13 @@ const SECOND_LANDING_DECK_LOCAL := Vector3(-0.45, -0.157, -0.02)
 ## _build_paths()'s gate/apron add_city_pad calls) before this node samples
 ## the ground here.
 const APRON_RADIUS := 52.0
+## Matches road_streamer.gd's own paving surface_offset (`_bake_route`'s 0.15 m
+## argument) for the main carriageway. The highway sits flush at this height
+## everywhere within its ground_pin's flat radius, which covers the rail-free
+## junction the access road and off-ramp both meet -- so the local roads must
+## reach that same height there, not an independently guessed one, or the two
+## decks step past each other right at the crossing.
+const HIGHWAY_DECK_OFFSET_M := 0.15
 const TRUCK_PARKING_WIDTH := 44.0
 const TRUCK_PARKING_LENGTH := 42.0
 const TRUCK_PARKING_SLOT_WIDTH := 16.0
@@ -84,7 +91,11 @@ func _ready() -> void:
 	var access: Array[Vector3] = []
 	for k in 21:
 		var t := float(k) / 20.0
-		access.append(gate_exit.bezier_interpolate(gate_exit + gate * access_handle, access_end - hwy * access_handle, access_end, t))
+		var p: Vector3 = gate_exit.bezier_interpolate(gate_exit + gate * access_handle, access_end - hwy * access_handle, access_end, t)
+		# Level with the highway only by the time it reaches the crossing; the
+		# gate end stays flush with the forecourt/parking slabs at y=0.
+		p.y = lerpf(0.0, HIGHWAY_DECK_OFFSET_M, smoothstep(0.0, 1.0, t))
+		access.append(p)
 	_ribbon(access, 11.0, concrete)
 
 	# --- Freight staging outside the airlock. Two 12 m autonomous haulers fit
@@ -101,7 +112,11 @@ func _ready() -> void:
 	#     out toward the apron. No motorway rail crosses either local road.
 	var ramp_in := junction + hwy_side * 6.0
 	var ramp_out := apron_c - hwy_side * (apron_r - 8.0)
-	var y_hi: float = terrain.height_at(position.x + junction.x, position.z + junction.z) - position.y + 0.4
+	# Flush with the highway deck at the crossing (see HIGHWAY_DECK_OFFSET_M);
+	# this used to sample bare terrain + a guessed 0.4 m clearance, which sat
+	# noticeably above the actual carriageway and read as a bulge right where
+	# the ramp met it.
+	var y_hi: float = HIGHWAY_DECK_OFFSET_M
 	var handle := ramp_in.distance_to(ramp_out) * 0.42
 	var ramp: Array[Vector3] = []
 	var steps := 28
